@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol, overload, runtime_checkable
 
 import asyncpg
+import redis.asyncio as redis_async
 
 from pydantic_ai_todo.types import Todo
 
@@ -591,6 +592,248 @@ class AsyncPostgresStorage:
         return deleted
 
 
+class AsyncRedisStorage:
+    """Async Redis todo storage.
+
+    Implements AsyncTodoStorageProtocol with Redis backend.
+    Supports session-based multi-tenancy via session_id.
+
+    Todos are stored in a Redis Hash (one field per todo, JSON-serialized)
+    with a companion List to maintain insertion order.
+
+    Example with URL:
+        ```python
+        from pydantic_ai_todo import AsyncRedisStorage
+
+        storage = AsyncRedisStorage(
+            url="redis://localhost:6379",
+            session_id="user-123"
+        )
+        await storage.initialize()
+
+        # Use with toolset
+        toolset = create_todo_toolset(async_storage=storage)
+        ```
+
+    Example with existing client:
+        ```python
+        import redis.asyncio as redis_async
+        from pydantic_ai_todo import AsyncRedisStorage
+
+        client = redis_async.from_url("redis://localhost:6379")
+        storage = AsyncRedisStorage(client=client, session_id="user-123")
+        await storage.initialize()
+        ```
+    """
+
+    def __init__(
+        self,
+        *,
+        url: str | None = None,
+        client: redis_async.Redis | None = None,  # type: ignore[type-arg]
+        session_id: str,
+        key_prefix: str = "todos",
+        event_emitter: TodoEventEmitter | None = None,
+    ) -> None:
+        """Initialize Redis storage.
+
+        Args:
+            url: Redis URL (e.g. ``redis://localhost:6379``).
+                Either this or client is required.
+            client: Existing ``redis.asyncio.Redis`` client.
+                Either this or url is required.
+            session_id: Unique identifier for this session/user.
+                All operations are scoped to this.
+            key_prefix: Prefix for Redis keys (default: ``"todos"``).
+            event_emitter: Optional event emitter to receive CRUD events.
+
+        Raises:
+            ValueError: If neither url nor client is provided.
+        """
+        if url is None and client is None:
+            raise ValueError("Either url or client must be provided")
+
+        self._url = url
+        self._external_client = client
+        self._client: redis_async.Redis | None = client  # type: ignore[type-arg]
+        self._session_id = session_id
+        self._key_prefix = key_prefix
+        self._event_emitter = event_emitter
+        self._initialized = False
+
+    @property
+    def _hash_key(self) -> str:
+        """Redis Hash key storing todo data keyed by todo ID."""
+        return f"{self._key_prefix}:{self._session_id}"
+
+    @property
+    def _order_key(self) -> str:
+        """Redis List key maintaining insertion order of todo IDs."""
+        return f"{self._key_prefix}:{self._session_id}:order"
+
+    async def initialize(self) -> None:
+        """Initialize storage: create client if needed and verify connectivity.
+
+        Must be called before using the storage.
+        """
+        if self._client is None and self._url:
+            self._client = redis_async.from_url(self._url)
+
+        if self._client:
+            await self._client.ping()  # type: ignore[misc]
+            self._initialized = True
+
+    async def close(self) -> None:
+        """Close the Redis client if we created it.
+
+        Only closes the client if it was created from url.
+        External clients passed via client parameter are not closed.
+        """
+        if self._client and self._external_client is None:
+            await self._client.aclose()
+            self._client = None
+
+    def _ensure_initialized(self) -> redis_async.Redis:  # type: ignore[type-arg]
+        """Ensure storage is initialized and return client."""
+        if not self._initialized or self._client is None:
+            raise RuntimeError("Storage not initialized. Call initialize() first.")
+        return self._client
+
+    async def get_todos(self) -> list[Todo]:
+        """Get all todos for current session, in insertion order."""
+        client = self._ensure_initialized()
+        order_raw: list[bytes] = await client.lrange(self._order_key, 0, -1)  # type: ignore[misc]
+        if not order_raw:
+            return []
+
+        pipe = client.pipeline()
+        for todo_id_bytes in order_raw:
+            pipe.hget(self._hash_key, todo_id_bytes.decode())
+        results: list[bytes | None] = await pipe.execute()
+
+        todos: list[Todo] = []
+        for data in results:
+            if data is not None:
+                todos.append(Todo.model_validate_json(data))
+        return todos
+
+    async def set_todos(self, todos: list[Todo]) -> None:
+        """Replace all todos for current session atomically."""
+        client = self._ensure_initialized()
+        pipe = client.pipeline()
+        pipe.delete(self._hash_key)
+        pipe.delete(self._order_key)
+        for todo in todos:
+            pipe.hset(self._hash_key, todo.id, todo.model_dump_json())
+            pipe.rpush(self._order_key, todo.id)
+        await pipe.execute()
+
+    async def get_todo(self, id: str) -> Todo | None:
+        """Get a single todo by ID for current session."""
+        client = self._ensure_initialized()
+        data: bytes | None = await client.hget(self._hash_key, id)  # type: ignore[misc]
+        if data is not None:
+            return Todo.model_validate_json(data)
+        return None
+
+    async def add_todo(self, todo: Todo) -> Todo:
+        """Add a new todo for current session."""
+        client = self._ensure_initialized()
+        pipe = client.pipeline()
+        pipe.hset(self._hash_key, todo.id, todo.model_dump_json())
+        pipe.rpush(self._order_key, todo.id)
+        await pipe.execute()
+
+        if self._event_emitter:
+            from pydantic_ai_todo.events import TodoEvent, TodoEventType
+
+            await self._event_emitter.emit(TodoEvent(event_type=TodoEventType.CREATED, todo=todo))
+
+        return todo
+
+    async def update_todo(
+        self,
+        id: str,
+        *,
+        content: str | None = None,
+        status: Literal["pending", "in_progress", "completed", "blocked"] | None = None,
+        active_form: str | None = None,
+        parent_id: str | None = None,
+        depends_on: list[str] | None = None,
+    ) -> Todo | None:
+        """Update a todo's fields by ID for current session."""
+        current = await self.get_todo(id)
+        if current is None:
+            return None
+
+        previous_state = current.model_copy() if self._event_emitter else None
+        old_status = current.status
+
+        if content is not None:
+            current.content = content
+        if status is not None:
+            current.status = status
+        if active_form is not None:
+            current.active_form = active_form
+        if parent_id is not None:
+            current.parent_id = parent_id
+        if depends_on is not None:
+            current.depends_on = depends_on
+
+        client = self._ensure_initialized()
+        await client.hset(self._hash_key, id, current.model_dump_json())  # type: ignore[misc]
+
+        if self._event_emitter:
+            from pydantic_ai_todo.events import TodoEvent, TodoEventType
+
+            await self._event_emitter.emit(
+                TodoEvent(
+                    event_type=TodoEventType.UPDATED,
+                    todo=current,
+                    previous_state=previous_state,
+                )
+            )
+
+            if status is not None and status != old_status:
+                await self._event_emitter.emit(
+                    TodoEvent(
+                        event_type=TodoEventType.STATUS_CHANGED,
+                        todo=current,
+                        previous_state=previous_state,
+                    )
+                )
+
+                if status == "completed":
+                    await self._event_emitter.emit(
+                        TodoEvent(
+                            event_type=TodoEventType.COMPLETED,
+                            todo=current,
+                            previous_state=previous_state,
+                        )
+                    )
+
+        return current
+
+    async def remove_todo(self, id: str) -> bool:
+        """Remove a todo by ID for current session."""
+        client = self._ensure_initialized()
+
+        todo = await self.get_todo(id) if self._event_emitter else None
+
+        removed: int = await client.hdel(self._hash_key, id)  # type: ignore[misc]
+        if removed:
+            await client.lrem(self._order_key, 1, id)  # type: ignore[misc]
+
+        deleted = removed > 0
+
+        if deleted and todo and self._event_emitter:
+            from pydantic_ai_todo.events import TodoEvent, TodoEventType
+
+            await self._event_emitter.emit(TodoEvent(event_type=TodoEventType.DELETED, todo=todo))
+
+        return deleted
+
+
 @overload
 def create_storage(
     backend: Literal["memory"] = "memory",
@@ -611,23 +854,41 @@ def create_storage(
 ) -> AsyncPostgresStorage: ...
 
 
+@overload
 def create_storage(
-    backend: Literal["memory", "postgres"] = "memory",
+    backend: Literal["redis"],
+    *,
+    url: str | None = None,
+    client: redis_async.Redis | None = None,  # type: ignore[type-arg]
+    session_id: str,
+    key_prefix: str = "todos",
+    event_emitter: TodoEventEmitter | None = None,
+) -> AsyncRedisStorage: ...
+
+
+def create_storage(
+    backend: Literal["memory", "postgres", "redis"] = "memory",
     *,
     connection_string: str | None = None,
     pool: asyncpg.Pool | None = None,
+    url: str | None = None,
+    client: redis_async.Redis | None = None,  # type: ignore[type-arg]
     session_id: str | None = None,
     table_name: str = "todos",
+    key_prefix: str = "todos",
     event_emitter: TodoEventEmitter | None = None,
-) -> AsyncMemoryStorage | AsyncPostgresStorage:
+) -> AsyncMemoryStorage | AsyncPostgresStorage | AsyncRedisStorage:
     """Factory function to create storage backends.
 
     Args:
-        backend: The storage backend to use ("memory" or "postgres").
+        backend: The storage backend to use (``"memory"``, ``"postgres"``, or ``"redis"``).
         connection_string: PostgreSQL connection string (postgres backend only).
         pool: Existing asyncpg pool (postgres backend only).
-        session_id: Session identifier for multi-tenancy (postgres backend only, required).
-        table_name: Database table name (postgres backend only, default: "todos").
+        url: Redis URL, e.g. ``"redis://localhost:6379"`` (redis backend only).
+        client: Existing ``redis.asyncio.Redis`` client (redis backend only).
+        session_id: Session identifier for multi-tenancy (postgres/redis, required).
+        table_name: Database table name (postgres backend only, default: ``"todos"``).
+        key_prefix: Redis key prefix (redis backend only, default: ``"todos"``).
         event_emitter: Optional event emitter to receive CRUD events.
 
     Returns:
@@ -653,6 +914,18 @@ def create_storage(
         await storage.initialize()  # Required for postgres
         ```
 
+    Example (redis):
+        ```python
+        from pydantic_ai_todo import create_storage
+
+        storage = create_storage(
+            "redis",
+            url="redis://localhost:6379",
+            session_id="user-123"
+        )
+        await storage.initialize()  # Required for redis
+        ```
+
     With events:
         ```python
         from pydantic_ai_todo import create_storage, TodoEventEmitter
@@ -672,6 +945,17 @@ def create_storage(
             pool=pool,
             session_id=session_id,
             table_name=table_name,
+            event_emitter=event_emitter,
+        )
+
+    if backend == "redis":
+        if session_id is None:
+            raise ValueError("session_id is required for redis backend")
+        return AsyncRedisStorage(
+            url=url,
+            client=client,
+            session_id=session_id,
+            key_prefix=key_prefix,
             event_emitter=event_emitter,
         )
 
