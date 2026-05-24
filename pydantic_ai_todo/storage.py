@@ -663,19 +663,36 @@ class AsyncRedisStorage:
 
     @property
     def _hash_key(self) -> str:
-        """Redis Hash key storing todo data keyed by todo ID."""
-        return f"{self._key_prefix}:{self._session_id}"
+        """Redis Hash key storing todo data keyed by todo ID.
+
+        The session id is wrapped in ``{...}`` so Redis Cluster hashes
+        it as a single hash-tag, keeping :attr:`_hash_key` and
+        :attr:`_order_key` co-located on the same slot. Without that
+        guarantee the multi-key pipelines in :meth:`set_todos`,
+        :meth:`add_todo` and :meth:`remove_todo` would fail with
+        ``CROSSSLOT`` under clustered deployments. On single-node Redis
+        the hash-tag is a no-op.
+        """
+        return f"{self._key_prefix}:{{{self._session_id}}}"
 
     @property
     def _order_key(self) -> str:
-        """Redis List key maintaining insertion order of todo IDs."""
-        return f"{self._key_prefix}:{self._session_id}:order"
+        """Redis List key maintaining insertion order of todo IDs.
+
+        Shares the ``{session_id}`` hash-tag with :attr:`_hash_key` so
+        both keys route to the same Redis Cluster slot.
+        """
+        return f"{self._key_prefix}:{{{self._session_id}}}:order"
 
     async def initialize(self) -> None:
         """Initialize storage: create client if needed and verify connectivity.
 
-        Must be called before using the storage.
+        Idempotent — calling more than once is a no-op after the first
+        successful initialization.
         """
+        if self._initialized:
+            return
+
         if self._client is None and self._url:
             self._client = redis_async.from_url(self._url)
 
@@ -815,16 +832,25 @@ class AsyncRedisStorage:
         return current
 
     async def remove_todo(self, id: str) -> bool:
-        """Remove a todo by ID for current session."""
+        """Remove a todo by ID for current session.
+
+        Hash and order-list deletion happen atomically inside a single
+        pipeline so a connection drop between the two cannot leave the
+        order list pointing at a deleted hash entry.
+        """
         client = self._ensure_initialized()
 
         todo = await self.get_todo(id) if self._event_emitter else None
 
-        removed: int = await client.hdel(self._hash_key, id)  # type: ignore[misc]
-        if removed:
-            await client.lrem(self._order_key, 1, id)  # type: ignore[misc]
+        # Pipeline both ops so we never end up with an orphaned id in the
+        # order list. ``lrem`` on a missing id is a no-op, so it is safe
+        # to send unconditionally.
+        pipe = client.pipeline()
+        pipe.hdel(self._hash_key, id)
+        pipe.lrem(self._order_key, 1, id)
+        results: list[int] = await pipe.execute()
 
-        deleted = removed > 0
+        deleted = int(results[0]) > 0
 
         if deleted and todo and self._event_emitter:
             from pydantic_ai_todo.events import TodoEvent, TodoEventType

@@ -71,22 +71,35 @@ class TestAsyncRedisStorageInit:
         assert storage._event_emitter is emitter
 
     def test_hash_key_property(self) -> None:
-        """Test that _hash_key returns correct Redis key."""
+        """_hash_key wraps the session id in a Redis Cluster hash-tag."""
         storage = AsyncRedisStorage(
             url="redis://localhost:6379",
             session_id="user-123",
             key_prefix="mytodos",
         )
-        assert storage._hash_key == "mytodos:user-123"
+        assert storage._hash_key == "mytodos:{user-123}"
 
     def test_order_key_property(self) -> None:
-        """Test that _order_key returns correct Redis key."""
+        """_order_key shares the same hash-tag as _hash_key."""
         storage = AsyncRedisStorage(
             url="redis://localhost:6379",
             session_id="user-123",
             key_prefix="mytodos",
         )
-        assert storage._order_key == "mytodos:user-123:order"
+        assert storage._order_key == "mytodos:{user-123}:order"
+
+    def test_keys_share_hash_tag_for_cluster_safety(self) -> None:
+        """_hash_key and _order_key MUST land in the same Cluster slot.
+
+        Redis Cluster routes by the substring between ``{`` and ``}``; if
+        the two keys had different hash tags, the multi-key pipelines in
+        set_todos/add_todo/remove_todo would fail with CROSSSLOT under a
+        clustered deployment.
+        """
+        storage = AsyncRedisStorage(url="redis://localhost:6379", session_id="abc-xyz")
+        hash_tag_h = storage._hash_key.split("{", 1)[1].split("}", 1)[0]
+        hash_tag_o = storage._order_key.split("{", 1)[1].split("}", 1)[0]
+        assert hash_tag_h == hash_tag_o == "abc-xyz"
 
 
 class TestAsyncRedisStorageNotInitialized:
@@ -123,6 +136,8 @@ class TestAsyncRedisStorageMocked:
         pipe.rpush = MagicMock(return_value=pipe)
         pipe.delete = MagicMock(return_value=pipe)
         pipe.hget = MagicMock(return_value=pipe)
+        pipe.hdel = MagicMock(return_value=pipe)
+        pipe.lrem = MagicMock(return_value=pipe)
         pipe.execute = AsyncMock(return_value=[])
         client.pipeline = MagicMock(return_value=pipe)
 
@@ -146,6 +161,20 @@ class TestAsyncRedisStorageMocked:
         )
         await storage.initialize()
 
+        mock_client.ping.assert_called_once()
+        assert storage._initialized
+
+    async def test_initialize_is_idempotent(self, mock_client: MagicMock) -> None:
+        """Calling initialize() more than once is a no-op after the first."""
+        storage = AsyncRedisStorage(
+            client=mock_client,
+            session_id="test-session",
+        )
+        await storage.initialize()
+        await storage.initialize()
+        await storage.initialize()
+
+        # Only the first call should reach the server.
         mock_client.ping.assert_called_once()
         assert storage._initialized
 
@@ -345,28 +374,34 @@ class TestAsyncRedisStorageMocked:
         assert result is None
 
     async def test_remove_todo(self, storage: AsyncRedisStorage, mock_client: MagicMock) -> None:
-        """Test removing a todo."""
-        mock_client.hdel = AsyncMock(return_value=1)
-        mock_client.lrem = AsyncMock(return_value=1)
+        """remove_todo pipelines hdel + lrem so they cannot diverge."""
+        pipe = mock_client.pipeline.return_value
+        pipe.execute = AsyncMock(return_value=[1, 1])  # hdel removed 1, lrem removed 1
 
         result = await storage.remove_todo("abc12345")
 
         assert result is True
-        mock_client.hdel.assert_called_once()
-        mock_client.lrem.assert_called_once()
+        # Both ops go through the same pipeline — never a separate round-trip.
+        pipe.hdel.assert_called_once()
+        pipe.lrem.assert_called_once()
+        pipe.execute.assert_awaited_once()
+        # And nothing is sent directly on the client.
+        mock_client.hdel.assert_not_called()
+        mock_client.lrem.assert_not_called()
 
     async def test_remove_todo_not_found(
         self, storage: AsyncRedisStorage, mock_client: MagicMock
     ) -> None:
-        """Test removing a non-existent todo."""
-        mock_client.hdel = AsyncMock(return_value=0)
+        """remove_todo returns False when the hash field did not exist."""
+        pipe = mock_client.pipeline.return_value
+        pipe.execute = AsyncMock(return_value=[0, 0])
 
         result = await storage.remove_todo("nonexistent")
 
         assert result is False
 
     async def test_remove_todo_emits_event(self, mock_client: MagicMock) -> None:
-        """Test that remove_todo emits DELETED event."""
+        """remove_todo emits DELETED event when the todo existed."""
         emitter = TodoEventEmitter()
         events: list[tuple[TodoEventType, Todo]] = []
 
@@ -383,8 +418,8 @@ class TestAsyncRedisStorageMocked:
 
         todo = Todo(id="abc12345", content="Test", status="pending", active_form="Testing")
         mock_client.hget = AsyncMock(return_value=todo.model_dump_json().encode())
-        mock_client.hdel = AsyncMock(return_value=1)
-        mock_client.lrem = AsyncMock(return_value=1)
+        pipe = mock_client.pipeline.return_value
+        pipe.execute = AsyncMock(return_value=[1, 1])
 
         await storage.remove_todo("abc12345")
 

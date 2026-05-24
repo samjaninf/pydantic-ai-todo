@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-05-24
+
+### Added
+
+- **`AsyncRedisStorage` — third storage backend, Redis-based** ([#18](https://github.com/vstorm-co/pydantic-ai-todo/pull/18) by [@shamalgithub](https://github.com/shamalgithub)). Stores each session's todos in a Redis Hash (one field per todo, JSON-serialized) with a companion List for insertion order. Supports either URL-based construction (`AsyncRedisStorage(url="redis://...", session_id=...)`) or injection of an existing `redis.asyncio.Redis` client (`AsyncRedisStorage(client=..., session_id=...)`). Session-scoped keys give multi-tenancy out of the box, the event emitter integration mirrors the other backends (CREATED, UPDATED, STATUS_CHANGED, COMPLETED, DELETED), and `create_storage("redis", ...)` plus a new overload land the factory shape. Adds `redis>=7.4.0` as a dependency and exports `AsyncRedisStorage` from the package root.
+
+### Fixed
+
+- **`AsyncRedisStorage.remove_todo` is now atomic.** The previous two-round-trip implementation (`hdel` then `lrem`) could leave the order list pointing at a deleted hash entry if the connection dropped between the two; both ops now go through a single pipeline so they cannot diverge.
+- **`AsyncRedisStorage` is Redis Cluster-safe.** `_hash_key` and `_order_key` now share a `{session_id}` hash-tag (`todos:{user-123}` / `todos:{user-123}:order`) so both keys route to the same Cluster slot. Without it the multi-key pipelines in `set_todos` / `add_todo` / `remove_todo` would fail with `CROSSSLOT` under clustered deployments. No-op on single-node Redis.
+- **`AsyncRedisStorage.initialize()` is now idempotent.** A second call is a no-op instead of issuing another `PING`.
+- **`.gitignore` cleanup** — fixed an "Ingore" typo, trimmed trailing whitespace, and added the missing final newline introduced in #18.
+
 ## [0.2.1] - 2026-03-31
 
 ### Changed
