@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-05-24
+
+### Infrastructure
+
+Pure CI / dependency-bot housekeeping — no source-code changes, no behaviour change since 0.2.2. Consolidates the open Renovate auto-PRs and the rate-limited items from the [Dependency Dashboard #24](https://github.com/vstorm-co/pydantic-ai-todo/issues/24) into a single release so downstream consumers see one bump instead of four.
+
+- **CI: bump `actions/checkout` to `v6`** across `ci.yml` (×3), `docs.yml`, `publish.yml` ([#23](https://github.com/vstorm-co/pydantic-ai-todo/pull/23), Renovate auto-PR — folded in here).
+- **CI: bump `docs.yml` Python to `3.14`** ([#22](https://github.com/vstorm-co/pydantic-ai-todo/pull/22), Renovate auto-PR — folded in here).
+- **CI: bump `astral-sh/setup-uv` to `v8.1.0`** across `ci.yml` (×3) and `publish.yml` — from Dashboard #24. Pinned to the specific patch because `astral-sh/setup-uv` does not maintain a rolling `v8` tag (only `v8.0.0` / `v8.1.0`; `v7` and earlier do have rolling majors).
+- **CI: bump `actions/setup-python` to `v6`** in `docs.yml` — from Dashboard #24; `v6` has a rolling tag so plain `@v6` is used.
+
+The `ci.yml` test matrix (`["3.10", "3.13"]` and `["3.10", "3.11", "3.12", "3.13"]`) is unchanged in this release.
+
 ## [0.2.2] - 2026-05-24
 
 ### Added
