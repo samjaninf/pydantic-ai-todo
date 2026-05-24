@@ -20,7 +20,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-dependencies = ["pydantic-ai-slim>=1.74.0", "pydantic>=2.0", "asyncpg>=0.29.0"]
+dependencies = [
+    "pydantic-ai-slim>=1.74.0",
+    "pydantic>=2.0",
+    "asyncpg>=0.29.0",
+    "redis>=7.4.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/vstorm-co/pydantic-ai-todo"
