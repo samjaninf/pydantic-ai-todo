@@ -209,9 +209,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Ignore git attribute file
+.gitattributes
 
-# Ingore git attribute file 
-.gitattributes  
-
-# Ignore the devcontainer files 
+# Ignore the devcontainer files
 .devcontainer
