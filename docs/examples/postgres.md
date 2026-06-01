@@ -4,11 +4,8 @@ Persistent storage with PostgreSQL and multi-tenancy support.
 
 ## Prerequisites
 
-Install asyncpg:
-
-```bash
-pip install asyncpg
-```
+`asyncpg` ships as a core dependency of `pydantic-ai-todo`, so no extra install
+is required — you only need a running PostgreSQL server to connect to.
 
 ## Basic Usage
 

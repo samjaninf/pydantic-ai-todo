@@ -19,6 +19,9 @@ Storage backends for task persistence.
 - [`TodoStorage`](storage.md#todostorage) — Sync in-memory storage
 - [`AsyncMemoryStorage`](storage.md#asyncmemorystorage) — Async in-memory storage
 - [`AsyncPostgresStorage`](storage.md#asyncpostgresstorage) — PostgreSQL storage
+- [`AsyncRedisStorage`](storage.md#asyncredisstorage) — Redis storage
+- [`TodoStorageProtocol`](storage.md#todostorageprotocol) — Sync storage interface
+- [`AsyncTodoStorageProtocol`](storage.md#asynctodostorageprotocol) — Async storage interface
 - [`create_storage()`](storage.md#create_storage) — Storage factory function
 
 ### Types

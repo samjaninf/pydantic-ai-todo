@@ -6,9 +6,10 @@ pydantic-ai-todo supports multiple storage backends for different use cases.
 
 | Backend | Class | Persistence | Multi-Tenancy | Use Case |
 |---------|-------|-------------|---------------|----------|
-| Sync Memory | `TodoStorage` | No | No | Testing, simple agents |
-| Async Memory | `AsyncMemoryStorage` | No | No | Async agents |
-| PostgreSQL | `AsyncPostgresStorage` | Yes | Yes | Production apps |
+| Sync Memory | [`TodoStorage`][pydantic_ai_todo.TodoStorage] | No | No | Testing, simple agents |
+| Async Memory | [`AsyncMemoryStorage`][pydantic_ai_todo.AsyncMemoryStorage] | No | No | Async agents |
+| PostgreSQL | [`AsyncPostgresStorage`][pydantic_ai_todo.AsyncPostgresStorage] | Yes | Yes | Production apps |
+| Redis | [`AsyncRedisStorage`][pydantic_ai_todo.AsyncRedisStorage] | Yes | Yes | Production apps, fast session-scoped storage |
 
 ## Sync In-Memory Storage
 
@@ -116,6 +117,57 @@ CREATE INDEX IF NOT EXISTS idx_todos_session_id ON todos(session_id);
 - Multi-user apps
 - Persistent task storage
 
+## Redis Storage
+
+Persistent, session-scoped storage backed by Redis. Todos are stored in a Redis
+Hash (one field per todo, JSON-serialized) with a companion List that preserves
+insertion order. The `session_id` is hash-tagged so both keys co-locate on the
+same Redis Cluster slot.
+
+```python
+from pydantic_ai_todo import create_storage, create_todo_toolset
+
+storage = create_storage(
+    "redis",
+    url="redis://localhost:6379",
+    session_id="user-123",
+)
+await storage.initialize()  # Verifies connectivity
+
+toolset = create_todo_toolset(async_storage=storage)
+
+# When done
+await storage.close()
+```
+
+You can also pass an existing `redis.asyncio.Redis` client via `client=` instead
+of `url=`. Each `session_id` isolates todos, just like PostgreSQL.
+
+### When to Use
+
+- Production applications needing fast, session-scoped storage
+- Multi-user apps
+- Sharing todo state across processes
+
+## Storage Lifecycle
+
+The async database backends ([`AsyncPostgresStorage`][pydantic_ai_todo.AsyncPostgresStorage]
+and [`AsyncRedisStorage`][pydantic_ai_todo.AsyncRedisStorage]) require an explicit
+lifecycle:
+
+- **`initialize()` must be called before use.** Postgres creates its connection
+  pool and ensures the table exists; Redis creates its client and verifies
+  connectivity with a `PING`. Every storage operation calls an internal
+  `_ensure_initialized()` check that raises `RuntimeError("Storage not
+  initialized. Call initialize() first.")` if you skip it. `AsyncRedisStorage.initialize()`
+  is idempotent — calling it again after a successful init is a no-op.
+- **`close()` only closes resources this storage owns.** If the pool/client was
+  created internally from `connection_string`/`url`, `close()` shuts it down. If
+  you passed an existing `pool=` or `client=`, it is left open for you to manage.
+
+[`AsyncMemoryStorage`][pydantic_ai_todo.AsyncMemoryStorage] has no
+`initialize()`/`close()` requirements.
+
 ## Factory Function
 
 Use `create_storage()` for consistent backend creation:
@@ -134,56 +186,59 @@ storage = create_storage(
     table_name="todos",  # optional
     event_emitter=emitter,  # optional
 )
+
+# Redis
+storage = create_storage(
+    "redis",
+    url="redis://localhost:6379",
+    session_id="user-123",
+    key_prefix="todos",  # optional
+    event_emitter=emitter,  # optional
+)
 ```
 
 ## Protocols
 
 ### TodoStorageProtocol
 
-For sync storage:
-
-```python
-class TodoStorageProtocol(Protocol):
-    @property
-    def todos(self) -> list[Todo]: ...
-    
-    @todos.setter
-    def todos(self, value: list[Todo]) -> None: ...
-```
+The interface for sync storage — any object exposing a read/write `todos`
+property satisfies it. See the full signature in the API reference:
+[`TodoStorageProtocol`][pydantic_ai_todo.TodoStorageProtocol].
 
 ### AsyncTodoStorageProtocol
 
-For async storage:
-
-```python
-class AsyncTodoStorageProtocol(Protocol):
-    async def get_todos(self) -> list[Todo]: ...
-    async def set_todos(self, todos: list[Todo]) -> None: ...
-    async def get_todo(self, id: str) -> Todo | None: ...
-    async def add_todo(self, todo: Todo) -> Todo: ...
-    async def update_todo(self, id: str, **fields) -> Todo | None: ...
-    async def remove_todo(self, id: str) -> bool: ...
-```
+The interface for async storage. Note that `update_todo` takes explicit keyword
+parameters (`content`, `status`, `active_form`, `parent_id`, `depends_on`), not
+arbitrary `**fields`. See the full signature in the API reference:
+[`AsyncTodoStorageProtocol`][pydantic_ai_todo.AsyncTodoStorageProtocol].
 
 ## Custom Storage
+
+!!! tip "Use the built-in backend for production"
+
+    The example below shows how to implement
+    [`AsyncTodoStorageProtocol`][pydantic_ai_todo.AsyncTodoStorageProtocol] for a
+    custom backend. For real Redis usage, prefer the built-in
+    [`AsyncRedisStorage`][pydantic_ai_todo.AsyncRedisStorage] (atomic pipelines,
+    insertion ordering, multi-tenancy, events) rather than hand-rolling one.
 
 Implement the protocol for custom backends:
 
 ```python
 from pydantic_ai_todo import AsyncTodoStorageProtocol, Todo
 
-class RedisStorage:
-    """Redis-based storage."""
-    
+class MyCustomStorage:
+    """Example custom backend (illustrative — not production-ready)."""
+
     def __init__(self, redis_client):
         self._redis = redis_client
-    
+
     async def get_todos(self) -> list[Todo]:
         data = await self._redis.get("todos")
         return [Todo(**t) for t in json.loads(data)] if data else []
-    
+
     async def set_todos(self, todos: list[Todo]) -> None:
         await self._redis.set("todos", json.dumps([t.model_dump() for t in todos]))
-    
-    # ... implement other methods
+
+    # ... implement get_todo, add_todo, update_todo, remove_todo
 ```

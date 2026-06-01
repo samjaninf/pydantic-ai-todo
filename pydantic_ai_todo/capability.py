@@ -1,6 +1,6 @@
 """Todo capability for pydantic-ai agents.
 
-Provides a ``TodoCapability`` that integrates todo toolset + dynamic instructions
+Provides a `TodoCapability` that integrates todo toolset + dynamic instructions
 via the pydantic-ai capabilities API.
 
 Example:

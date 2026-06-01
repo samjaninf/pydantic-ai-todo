@@ -91,7 +91,7 @@ class TestAsyncRedisStorageInit:
     def test_keys_share_hash_tag_for_cluster_safety(self) -> None:
         """_hash_key and _order_key MUST land in the same Cluster slot.
 
-        Redis Cluster routes by the substring between ``{`` and ``}``; if
+        Redis Cluster routes by the substring between `{` and `}`; if
         the two keys had different hash tags, the multi-key pipelines in
         set_todos/add_todo/remove_todo would fail with CROSSSLOT under a
         clustered deployment.

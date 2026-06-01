@@ -241,11 +241,19 @@ todos = await read_todos(hierarchical=True)
 Get tasks that can be worked on immediately:
 
 ```python
-# Returns only tasks where:
-# - status is "pending" or "in_progress"
-# - all dependencies are completed
+# get_available_tasks returns a task only when BOTH hold:
+# - its stored status is NOT "completed" and NOT "blocked"
+# - none of its `depends_on` tasks are still incomplete
+#   (checked live by _is_blocked at call time, not from stored status)
 available = await get_available_tasks()
 ```
+
+Availability is computed **live** on each call. A task is included only if its
+stored status is neither `completed` nor `blocked`, *and* a fresh dependency
+check (`_is_blocked`) confirms all of its `depends_on` prerequisites are
+`completed`. Note that the stored `blocked` status is never recomputed by this
+tool — a task left with status `blocked` is always excluded, even if its
+dependencies have since completed.
 
 ## Status Values
 
@@ -291,4 +299,4 @@ available = [t for t in todos if t.status in ("pending", "in_progress")]
 1. **Use subtasks for breakdown** - Let the agent break complex tasks into subtasks
 2. **Set dependencies explicitly** - Don't assume order from list position
 3. **Check available tasks** - Use `get_available_tasks` to find what can be done next
-4. **Handle blocked status** - Tasks automatically unblock when dependencies complete
+4. **Handle blocked status** - The stored `blocked` status does **not** clear itself. When a task is given a dependency via `set_dependency`, it is marked `blocked` and stays that way until something explicitly updates it (e.g. `update_todo_status`). What changes automatically is *availability*: once the prerequisite is `completed`, `get_available_tasks` will surface the task again only if its stored status was moved off `blocked` (for example back to `pending`).

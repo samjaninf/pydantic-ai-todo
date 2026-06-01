@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-06-01
+
+### Changed
+
+- **Docstring hygiene (internal; no behavior change).** Converted reStructuredText-style double-backtick inline code in docstrings and comments to single-backtick Markdown (25 occurrences), so it renders correctly under the mkdocstrings Markdown handler. No function-local imports needed hoisting (the package already keeps its imports at module top).
+
+### Documentation
+
+- **Documentation accuracy pass.** Corrected the installation guide (PostgreSQL `asyncpg` and Redis `redis` are core dependencies, not optional extras), documented the previously-undocumented `AsyncRedisStorage` backend (API reference, storage overview, and connection-lifecycle notes), and fixed the misleading "tasks automatically unblock" claim — a `blocked` status is never auto-cleared; `get_available_tasks` computes availability live and excludes blocked tasks. Added an explicit note that task events fire only from async storage backends (the sync `TodoStorage`/toolset path emits nothing), fixed the `read_todos` sample output to match the real numbered/icon format, replaced hand-copied (and drifted) `TodoItem`/protocol snippets with mkdocstrings renders, documented the exported `*_DESCRIPTION`/`TODO_SYSTEM_PROMPT` constants, and noted the static-prompt behavior when only `async_storage` is provided. `mkdocs build --strict` now passes with zero warnings.
+
 ## [0.2.3] - 2026-05-24
 
 ### Infrastructure

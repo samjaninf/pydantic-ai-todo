@@ -638,13 +638,13 @@ class AsyncRedisStorage:
         """Initialize Redis storage.
 
         Args:
-            url: Redis URL (e.g. ``redis://localhost:6379``).
+            url: Redis URL (e.g. `redis://localhost:6379`).
                 Either this or client is required.
-            client: Existing ``redis.asyncio.Redis`` client.
+            client: Existing `redis.asyncio.Redis` client.
                 Either this or url is required.
             session_id: Unique identifier for this session/user.
                 All operations are scoped to this.
-            key_prefix: Prefix for Redis keys (default: ``"todos"``).
+            key_prefix: Prefix for Redis keys (default: `"todos"`).
             event_emitter: Optional event emitter to receive CRUD events.
 
         Raises:
@@ -665,12 +665,12 @@ class AsyncRedisStorage:
     def _hash_key(self) -> str:
         """Redis Hash key storing todo data keyed by todo ID.
 
-        The session id is wrapped in ``{...}`` so Redis Cluster hashes
+        The session id is wrapped in `{...}` so Redis Cluster hashes
         it as a single hash-tag, keeping :attr:`_hash_key` and
         :attr:`_order_key` co-located on the same slot. Without that
         guarantee the multi-key pipelines in :meth:`set_todos`,
         :meth:`add_todo` and :meth:`remove_todo` would fail with
-        ``CROSSSLOT`` under clustered deployments. On single-node Redis
+        `CROSSSLOT` under clustered deployments. On single-node Redis
         the hash-tag is a no-op.
         """
         return f"{self._key_prefix}:{{{self._session_id}}}"
@@ -679,7 +679,7 @@ class AsyncRedisStorage:
     def _order_key(self) -> str:
         """Redis List key maintaining insertion order of todo IDs.
 
-        Shares the ``{session_id}`` hash-tag with :attr:`_hash_key` so
+        Shares the `{session_id}` hash-tag with :attr:`_hash_key` so
         both keys route to the same Redis Cluster slot.
         """
         return f"{self._key_prefix}:{{{self._session_id}}}:order"
@@ -843,7 +843,7 @@ class AsyncRedisStorage:
         todo = await self.get_todo(id) if self._event_emitter else None
 
         # Pipeline both ops so we never end up with an orphaned id in the
-        # order list. ``lrem`` on a missing id is a no-op, so it is safe
+        # order list. `lrem` on a missing id is a no-op, so it is safe
         # to send unconditionally.
         pipe = client.pipeline()
         pipe.hdel(self._hash_key, id)
@@ -907,14 +907,14 @@ def create_storage(
     """Factory function to create storage backends.
 
     Args:
-        backend: The storage backend to use (``"memory"``, ``"postgres"``, or ``"redis"``).
+        backend: The storage backend to use (`"memory"`, `"postgres"`, or `"redis"`).
         connection_string: PostgreSQL connection string (postgres backend only).
         pool: Existing asyncpg pool (postgres backend only).
-        url: Redis URL, e.g. ``"redis://localhost:6379"`` (redis backend only).
-        client: Existing ``redis.asyncio.Redis`` client (redis backend only).
+        url: Redis URL, e.g. `"redis://localhost:6379"` (redis backend only).
+        client: Existing `redis.asyncio.Redis` client (redis backend only).
         session_id: Session identifier for multi-tenancy (postgres/redis, required).
-        table_name: Database table name (postgres backend only, default: ``"todos"``).
-        key_prefix: Redis key prefix (redis backend only, default: ``"todos"``).
+        table_name: Database table name (postgres backend only, default: `"todos"`).
+        key_prefix: Redis key prefix (redis backend only, default: `"todos"`).
         event_emitter: Optional event emitter to receive CRUD events.
 
     Returns:
