@@ -48,26 +48,27 @@ agent = Agent("openai:gpt-4.1", capabilities=[TodoCapability()])
 
 The standalone toolset for when you need more control:
 
-- `create_todo_toolset()` — Factory function
+- [`create_todo_toolset()`][pydantic_ai_todo.create_todo_toolset] — Factory function
 - Tools: `read_todos`, `write_todos`, `add_todo`, etc.
 - Optional subtask tools with `enable_subtasks=True`
-- Requires manual system prompt wiring via `get_todo_system_prompt()`
+- Requires manual system prompt wiring via [`get_todo_system_prompt()`][pydantic_ai_todo.get_todo_system_prompt]
 
 ### [Storage](storage.md)
 
 Multiple storage backends for different needs:
 
-- `TodoStorage` — Simple sync in-memory
-- `AsyncMemoryStorage` — Async with CRUD operations
-- `AsyncPostgresStorage` — Persistent with multi-tenancy
+- [`TodoStorage`][pydantic_ai_todo.TodoStorage] — Simple sync in-memory
+- [`AsyncMemoryStorage`][pydantic_ai_todo.AsyncMemoryStorage] — Async with CRUD operations
+- [`AsyncPostgresStorage`][pydantic_ai_todo.AsyncPostgresStorage] — Persistent with multi-tenancy
+- [`AsyncRedisStorage`][pydantic_ai_todo.AsyncRedisStorage] — Persistent, session-scoped Redis
 
 ### [Types](types.md)
 
 Pydantic models for type safety:
 
-- `Todo` — The task model
-- `TodoItem` — Input model for LLM
-- `TodoEvent` — Event data model
+- [`Todo`][pydantic_ai_todo.Todo] — The task model
+- [`TodoItem`][pydantic_ai_todo.TodoItem] — Input model for LLM
+- [`TodoEvent`][pydantic_ai_todo.TodoEvent] — Event data model
 
 ## How It Works
 

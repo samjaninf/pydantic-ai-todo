@@ -253,9 +253,9 @@ def create_todo_toolset(
             - 'blocked' status for tasks with incomplete dependencies
         descriptions: Optional dict mapping tool names to custom descriptions.
             Override any tool's description by providing its name as key.
-            Tool names: ``read_todos``, ``write_todos``, ``add_todo``,
-            ``update_todo_status``, ``remove_todo``, ``add_subtask``,
-            ``set_dependency``, ``get_available_tasks``.
+            Tool names: `read_todos`, `write_todos`, `add_todo`,
+            `update_todo_status`, `remove_todo`, `add_subtask`,
+            `set_dependency`, `get_available_tasks`.
 
     Returns:
         FunctionToolset compatible with any pydantic-ai agent.

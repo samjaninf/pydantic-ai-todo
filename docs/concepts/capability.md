@@ -47,9 +47,25 @@ at construction time:
    (`read_todos`, `write_todos`, `add_todo`, `update_todo_status`, `remove_todo`,
    and optionally `add_subtask`, `set_dependency`, `get_available_tasks`)
 
-2. **`get_instructions()`** — returns a callable that generates the system prompt
-   dynamically. Every time the agent runs, it calls this function to get the
-   latest todo state, so the model always knows what tasks exist.
+2. **`get_instructions()`** — returns the system prompt. The exact behavior
+   depends on which storage you configured:
+
+    - **With sync `storage`:** returns a callable invoked per-run that builds the
+      prompt from the *current* todo list via
+      [`get_todo_system_prompt`][pydantic_ai_todo.get_todo_system_prompt], so the
+      model always sees the latest tasks.
+    - **With only `async_storage` (no sync `storage`):** returns the **static**
+      `TODO_SYSTEM_PROMPT` constant — the live todo
+      list is **not** injected into the system prompt (the capability does not
+      `await` async storage from the sync `get_instructions()` hook). The model
+      still sees current todos by calling `read_todos`.
+
+    !!! note "Dynamic injection needs sync storage"
+
+        If you want the current task list embedded in the system prompt on every
+        run, use sync `storage`. With async-only storage, rely on the `read_todos`
+        tool (or build the prompt yourself with
+        [`get_todo_system_prompt_async`][pydantic_ai_todo.get_todo_system_prompt_async]).
 
 ## Composing with Other Capabilities
 

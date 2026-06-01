@@ -11,17 +11,11 @@ How to move from in-memory storage to persistent PostgreSQL storage.
 | Scalability | Single process | Multiple processes / servers |
 | Use case | Prototyping, testing | Production |
 
-## Step 1: Install asyncpg
+## Step 1: Provision PostgreSQL
 
-```bash
-pip install asyncpg
-```
-
-Or if using pydantic-ai-todo extras:
-
-```bash
-pip install pydantic-ai-todo[postgres]
-```
+No extra install is needed — `asyncpg` is a core dependency of
+`pydantic-ai-todo`. Just make sure you have a PostgreSQL server available and a
+connection string to point at it.
 
 ## Step 2: Set Up PostgreSQL
 

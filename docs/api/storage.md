@@ -27,6 +27,33 @@
 
 ---
 
+## AsyncRedisStorage
+
+::: pydantic_ai_todo.AsyncRedisStorage
+    options:
+      show_root_heading: true
+      show_source: true
+
+---
+
+## TodoStorageProtocol
+
+::: pydantic_ai_todo.TodoStorageProtocol
+    options:
+      show_root_heading: true
+      show_source: true
+
+---
+
+## AsyncTodoStorageProtocol
+
+::: pydantic_ai_todo.AsyncTodoStorageProtocol
+    options:
+      show_root_heading: true
+      show_source: true
+
+---
+
 ## create_storage
 
 ::: pydantic_ai_todo.create_storage

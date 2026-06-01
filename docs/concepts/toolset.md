@@ -53,18 +53,24 @@ When `enable_subtasks=True`:
 
 ### read_todos
 
-Lists all tasks in a formatted view.
+Lists all tasks in a formatted view. The output is a `Current todos:` header
+followed by a numbered list, where each item shows a status icon and the todo
+ID, then a trailing `Summary:` line.
 
-```python
-# Agent calls this internally
-# Returns something like:
-"""
-Tasks:
-- [pending] [abc12345] Set up project structure
-- [in_progress] [def67890] Write documentation
-- [completed] [ghi11111] Create README
-"""
+```text
+Current todos:
+1. [ ] [abc12345] Set up project structure
+2. [*] [def67890] Write documentation
+3. [x] [ghi11111] Create README
+
+Summary: 1 completed, 1 in progress, 1 pending
 ```
+
+Status icons: `[ ]` pending, `[*]` in_progress, `[x]` completed. When
+`enable_subtasks=True`, blocked tasks render as `[!]`, the summary also reports a
+`blocked` count, and subtask/dependency relationships are shown on indented
+lines (and `read_todos(hierarchical=True)` renders a tree). If the list is empty,
+it returns `"No todos in the list. Use write_todos to create tasks."`.
 
 ### write_todos
 
@@ -140,6 +146,39 @@ Any tool name not included in the dict keeps its default description. Available
 tool names for the core tools: `read_todos`, `write_todos`, `add_todo`,
 `update_todo_status`, `remove_todo`. When `enable_subtasks=True`, you can also
 override: `add_subtask`, `set_dependency`, `get_available_tasks`.
+
+### Extending the Defaults
+
+The default descriptions and the system prompt are exported as module constants,
+so you can import and extend them instead of rewriting from scratch:
+
+- `TODO_TOOL_DESCRIPTION` (the `write_todos` default)
+- `READ_TODO_DESCRIPTION`
+- `ADD_TODO_DESCRIPTION`
+- `UPDATE_TODO_STATUS_DESCRIPTION`
+- `REMOVE_TODO_DESCRIPTION`
+- `ADD_SUBTASK_DESCRIPTION`
+- `SET_DEPENDENCY_DESCRIPTION`
+- `GET_AVAILABLE_TASKS_DESCRIPTION`
+- `TODO_SYSTEM_PROMPT` (the base system prompt)
+
+```python
+from pydantic_ai_todo import (
+    create_todo_toolset,
+    TODO_TOOL_DESCRIPTION,
+    TODO_SYSTEM_PROMPT,
+)
+
+# Append project-specific guidance to the default description
+toolset = create_todo_toolset(
+    descriptions={
+        "write_todos": TODO_TOOL_DESCRIPTION + "\n\nAlways include a test task.",
+    },
+)
+
+# Extend the base system prompt
+system_prompt = TODO_SYSTEM_PROMPT + "\n\nKeep tasks small and verifiable."
+```
 
 ## Factory Parameters
 

@@ -53,14 +53,11 @@ item = TodoItem(
 
 ### Why TodoItem?
 
-`TodoItem` has `Field` descriptions that help the LLM understand what to provide:
-
-```python
-class TodoItem(BaseModel):
-    content: str = Field(description="The task description")
-    status: str = Field(description="pending, in_progress, or completed")
-    active_form: str = Field(description="Present tense form for display")
-```
+`TodoItem` has `Field` descriptions that help the LLM understand what to provide.
+It carries the same fields as [`Todo`][pydantic_ai_todo.Todo] — including the
+optional `id`, `parent_id`, and `depends_on` for subtask hierarchies, and the
+full `status` literal (`pending`, `in_progress`, `completed`, `blocked`). See the
+full field reference: [`TodoItem`][pydantic_ai_todo.TodoItem].
 
 ## TodoEvent
 

@@ -2,6 +2,16 @@
 
 Reacting to task changes with callbacks.
 
+!!! warning "Events require an async storage backend"
+
+    Events fire only from the async storage backends
+    ([`AsyncMemoryStorage`][pydantic_ai_todo.AsyncMemoryStorage],
+    [`AsyncPostgresStorage`][pydantic_ai_todo.AsyncPostgresStorage],
+    [`AsyncRedisStorage`][pydantic_ai_todo.AsyncRedisStorage]) when constructed
+    with an `event_emitter`. The sync [`TodoStorage`][pydantic_ai_todo.TodoStorage]
+    and the sync toolset path emit nothing. The examples below all use
+    `async_storage=`.
+
 ## Basic Event Handling
 
 ```python
