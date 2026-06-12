@@ -42,11 +42,12 @@ from pydantic_ai_todo.toolset import (
     TODO_SYSTEM_PROMPT,
     TODO_TOOL_DESCRIPTION,
     UPDATE_TODO_STATUS_DESCRIPTION,
+    UPDATE_TODO_STATUSES_DESCRIPTION,
     create_todo_toolset,
     get_todo_system_prompt,
     get_todo_system_prompt_async,
 )
-from pydantic_ai_todo.types import Todo, TodoItem
+from pydantic_ai_todo.types import Todo, TodoItem, TodoStatusUpdate
 
 __all__ = [
     # Capability (recommended)
@@ -58,6 +59,7 @@ __all__ = [
     # Types
     "Todo",
     "TodoItem",
+    "TodoStatusUpdate",
     # Sync storage
     "TodoStorage",
     "TodoStorageProtocol",
@@ -77,6 +79,7 @@ __all__ = [
     "READ_TODO_DESCRIPTION",
     "ADD_TODO_DESCRIPTION",
     "UPDATE_TODO_STATUS_DESCRIPTION",
+    "UPDATE_TODO_STATUSES_DESCRIPTION",
     "REMOVE_TODO_DESCRIPTION",
     "ADD_SUBTASK_DESCRIPTION",
     "SET_DEPENDENCY_DESCRIPTION",
