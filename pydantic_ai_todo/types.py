@@ -58,3 +58,16 @@ class TodoItem(BaseModel):
         default_factory=list,
         description="List of todo IDs that must be completed before this task.",
     )
+
+
+class TodoStatusUpdate(BaseModel):
+    """Input model for a single entry of the update_todo_statuses batch tool.
+
+    Each entry pairs a todo ID with the status it should transition to.
+    """
+
+    todo_id: str = Field(..., description="The ID of the todo to update (from read_todos).")
+    status: Literal["pending", "in_progress", "completed", "blocked"] = Field(
+        ...,
+        description="New status: pending, in_progress, completed, or blocked.",
+    )

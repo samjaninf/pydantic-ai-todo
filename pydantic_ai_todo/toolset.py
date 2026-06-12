@@ -11,7 +11,7 @@ from pydantic_ai_todo.storage import (
     TodoStorage,
     TodoStorageProtocol,
 )
-from pydantic_ai_todo.types import Todo, TodoItem
+from pydantic_ai_todo.types import Todo, TodoItem, TodoStatusUpdate
 
 TODO_TOOL_DESCRIPTION = """\
 Use this tool to create and manage a structured task list for your current session. \
@@ -86,6 +86,9 @@ restructure the full task list.
 Preferred over write_todos when adding one task.
 - `update_todo_status` — Change a task's status by ID. \
 Use when starting (→ in_progress) or finishing (→ completed) a task.
+- `update_todo_statuses` — Change several tasks' statuses in one call. \
+Prefer this for a single workflow transition (e.g. complete the current task \
+and start the next one) instead of chaining separate update_todo_status calls.
 - `remove_todo` — Delete a task by ID. Use for tasks that are no longer \
 needed or were created in error.
 
@@ -162,6 +165,36 @@ Status progresses: `pending` → `in_progress` → `completed`
 
 Make sure to read the current todo list (read_todos) before updating \
 to ensure you're updating the correct task.
+"""
+
+UPDATE_TODO_STATUSES_DESCRIPTION = """\
+Update the status of several todos in a single call.
+
+## When to Use This Tool
+
+Use this when you want to apply one logical workflow transition that touches \
+more than one task — most commonly marking the current task `completed` and \
+the next task `in_progress` at the same time. It saves the read/update/update \
+round-trips that a chain of single update_todo_status calls would cost.
+
+## Parameters
+
+- **updates**: A list of `{todo_id, status}` entries. Each `todo_id` must refer \
+to an existing todo and each `status` must be one of pending, in_progress, \
+completed (or blocked when subtasks are enabled).
+
+## Behavior
+
+- **All-or-nothing**: the whole batch is validated first. If any entry has an \
+unknown todo_id, an invalid status, or tries to start a task with incomplete \
+dependencies, NO changes are applied and the errors are returned.
+- On success, returns a compact summary of the applied transitions.
+
+## Important
+
+- ONLY mark a task as completed when you have FULLY accomplished it.
+- Keep at most one task `in_progress` at a time — this tool is ideal for \
+handing off from a finished task to the next one atomically.
 """
 
 REMOVE_TODO_DESCRIPTION = """\
@@ -254,8 +287,8 @@ def create_todo_toolset(
         descriptions: Optional dict mapping tool names to custom descriptions.
             Override any tool's description by providing its name as key.
             Tool names: `read_todos`, `write_todos`, `add_todo`,
-            `update_todo_status`, `remove_todo`, `add_subtask`,
-            `set_dependency`, `get_available_tasks`.
+            `update_todo_status`, `update_todo_statuses`, `remove_todo`,
+            `add_subtask`, `set_dependency`, `get_available_tasks`.
 
     Returns:
         FunctionToolset compatible with any pydantic-ai agent.
@@ -567,6 +600,58 @@ def _create_sync_toolset(
                 return f"Updated todo '{todo.content}' status to '{status}'"
 
         return f"Todo with ID '{todo_id}' not found"
+
+    @toolset.tool_plain(
+        description=_descs.get("update_todo_statuses", UPDATE_TODO_STATUSES_DESCRIPTION),
+    )
+    async def update_todo_statuses(updates: list[TodoStatusUpdate]) -> str:
+        """Update the status of several todos atomically.
+
+        The whole batch is validated before any change is applied: if any entry
+        is invalid, no todo is modified.
+
+        Args:
+            updates: List of {todo_id, status} entries to apply.
+
+        Returns:
+            A compact summary of the applied transitions, or the validation
+            errors when nothing was applied.
+        """
+        if not updates:
+            return "No updates provided."
+
+        valid_statuses = {"pending", "in_progress", "completed"}
+        if enable_subtasks:
+            valid_statuses.add("blocked")
+
+        # Validate the whole batch first (all-or-nothing).
+        errors: list[str] = []
+        resolved: list[tuple[Todo, str]] = []
+        for update in updates:
+            if update.status not in valid_statuses:
+                errors.append(
+                    f"Invalid status '{update.status}' for todo '{update.todo_id}'. "
+                    f"Must be one of: {', '.join(sorted(valid_statuses))}"
+                )
+                continue
+            todo = _get_todo_by_id(update.todo_id)
+            if todo is None:
+                errors.append(f"Todo with ID '{update.todo_id}' not found")
+                continue
+            if enable_subtasks and update.status == "in_progress" and _is_blocked(todo):
+                errors.append(f"Cannot start '{todo.content}' - it has incomplete dependencies")
+                continue
+            resolved.append((todo, update.status))
+
+        if errors:
+            return "No changes applied. Errors:\n" + "\n".join(f"- {e}" for e in errors)
+
+        lines: list[str] = []
+        for todo, status in resolved:
+            todo.status = status  # type: ignore[assignment]
+            lines.append(f"- [{todo.id}] {todo.content} → {status}")
+
+        return f"Updated {len(resolved)} todos:\n" + "\n".join(lines)
 
     @toolset.tool_plain(description=_descs.get("remove_todo", REMOVE_TODO_DESCRIPTION))
     async def remove_todo(todo_id: str) -> str:
@@ -933,6 +1018,58 @@ def _create_async_toolset(
         if updated:
             return f"Updated todo '{updated.content}' status to '{status}'"
         return f"Todo with ID '{todo_id}' not found"
+
+    @toolset.tool_plain(
+        description=_descs.get("update_todo_statuses", UPDATE_TODO_STATUSES_DESCRIPTION),
+    )
+    async def update_todo_statuses(updates: list[TodoStatusUpdate]) -> str:
+        """Update the status of several todos atomically.
+
+        The whole batch is validated before any change is applied: if any entry
+        is invalid, no todo is modified.
+
+        Args:
+            updates: List of {todo_id, status} entries to apply.
+
+        Returns:
+            A compact summary of the applied transitions, or the validation
+            errors when nothing was applied.
+        """
+        if not updates:
+            return "No updates provided."
+
+        valid_statuses = {"pending", "in_progress", "completed"}
+        if enable_subtasks:
+            valid_statuses.add("blocked")
+
+        # Validate the whole batch first (all-or-nothing).
+        errors: list[str] = []
+        resolved: list[tuple[Todo, str]] = []
+        for update in updates:
+            if update.status not in valid_statuses:
+                errors.append(
+                    f"Invalid status '{update.status}' for todo '{update.todo_id}'. "
+                    f"Must be one of: {', '.join(sorted(valid_statuses))}"
+                )
+                continue
+            todo = await _get_todo_by_id(update.todo_id)
+            if todo is None:
+                errors.append(f"Todo with ID '{update.todo_id}' not found")
+                continue
+            if enable_subtasks and update.status == "in_progress" and await _is_blocked(todo):
+                errors.append(f"Cannot start '{todo.content}' - it has incomplete dependencies")
+                continue
+            resolved.append((todo, update.status))
+
+        if errors:
+            return "No changes applied. Errors:\n" + "\n".join(f"- {e}" for e in errors)
+
+        lines: list[str] = []
+        for todo, status in resolved:
+            await storage.update_todo(todo.id, status=status)  # type: ignore[arg-type]
+            lines.append(f"- [{todo.id}] {todo.content} → {status}")
+
+        return f"Updated {len(resolved)} todos:\n" + "\n".join(lines)
 
     @toolset.tool_plain(description=_descs.get("remove_todo", REMOVE_TODO_DESCRIPTION))
     async def remove_todo(todo_id: str) -> str:

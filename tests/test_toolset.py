@@ -9,6 +9,7 @@ from pydantic_ai_todo import (
     AsyncMemoryStorage,
     Todo,
     TodoItem,
+    TodoStatusUpdate,
     TodoStorage,
     create_todo_toolset,
     get_todo_system_prompt,
@@ -1954,3 +1955,282 @@ class TestReadTodosAllCompletedHint:
         read_todos = toolset.tools["read_todos"]
         result = await read_todos.function()  # type: ignore[call-arg]
         assert "Do NOT call read_todos again" in result
+
+
+class TestUpdateTodoStatuses:
+    """Tests for the update_todo_statuses batch tool (sync storage)."""
+
+    @pytest.fixture
+    def storage(self) -> TodoStorage:
+        """Create a storage instance."""
+        return TodoStorage()
+
+    @pytest.fixture
+    def toolset(self, storage: TodoStorage) -> FunctionToolset[Any]:
+        """Create a toolset with the storage."""
+        return create_todo_toolset(storage=storage)
+
+    def test_toolset_has_update_todo_statuses_tool(self, toolset: FunctionToolset[Any]) -> None:
+        """The batch tool is registered."""
+        assert "update_todo_statuses" in toolset.tools
+
+    async def test_batch_complete_and_start(
+        self, storage: TodoStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """One logical transition: complete the current task and start the next."""
+        storage.todos = [
+            Todo(id="todo-a", content="Task A", status="in_progress", active_form="Doing A"),
+            Todo(id="todo-b", content="Task B", status="pending", active_form="Doing B"),
+        ]
+        updates = [
+            TodoStatusUpdate(todo_id="todo-a", status="completed"),
+            TodoStatusUpdate(todo_id="todo-b", status="in_progress"),
+        ]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert storage.todos[0].status == "completed"
+        assert storage.todos[1].status == "in_progress"
+        assert "Updated 2 todos" in result
+        assert "[todo-a] Task A → completed" in result
+        assert "[todo-b] Task B → in_progress" in result
+
+    async def test_empty_updates(self, toolset: FunctionToolset[Any]) -> None:
+        """An empty batch is a no-op with a clear message."""
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=[])  # type: ignore[call-arg]
+        assert "No updates provided" in result
+
+    async def test_unknown_id_applies_nothing(
+        self, storage: TodoStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """A single bad ID aborts the whole batch (all-or-nothing)."""
+        storage.todos = [
+            Todo(id="todo-a", content="Task A", status="pending", active_form="Doing A"),
+        ]
+        updates = [
+            TodoStatusUpdate(todo_id="todo-a", status="completed"),
+            TodoStatusUpdate(todo_id="missing", status="in_progress"),
+        ]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert "No changes applied" in result
+        assert "Todo with ID 'missing' not found" in result
+        # The valid entry must NOT have been applied.
+        assert storage.todos[0].status == "pending"
+
+    async def test_invalid_status_applies_nothing(
+        self, storage: TodoStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """'blocked' is invalid without subtasks, so the batch is rejected."""
+        storage.todos = [
+            Todo(id="todo-a", content="Task A", status="pending", active_form="Doing A"),
+        ]
+        updates = [TodoStatusUpdate(todo_id="todo-a", status="blocked")]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert "No changes applied" in result
+        assert "Invalid status 'blocked'" in result
+        assert storage.todos[0].status == "pending"
+
+
+class TestUpdateTodoStatusesWithSubtasks:
+    """Tests for update_todo_statuses with subtasks enabled (sync)."""
+
+    @pytest.fixture
+    def storage(self) -> TodoStorage:
+        """Create a storage instance."""
+        return TodoStorage()
+
+    @pytest.fixture
+    def toolset(self, storage: TodoStorage) -> FunctionToolset[Any]:
+        """Create a toolset with subtasks enabled."""
+        return create_todo_toolset(storage=storage, enable_subtasks=True)
+
+    async def test_blocked_status_allowed(
+        self, storage: TodoStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """'blocked' is a valid target status when subtasks are enabled."""
+        storage.todos = [
+            Todo(id="task1", content="Task 1", status="pending", active_form="Working"),
+        ]
+        updates = [TodoStatusUpdate(todo_id="task1", status="blocked")]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert storage.todos[0].status == "blocked"
+        assert "task1] Task 1 → blocked" in result
+
+    async def test_cannot_start_blocked_dependency(
+        self, storage: TodoStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """Starting a task with incomplete dependencies aborts the batch."""
+        storage.todos = [
+            Todo(id="task1", content="Task 1", status="pending", active_form="Working"),
+            Todo(
+                id="task2",
+                content="Task 2",
+                status="pending",
+                active_form="Working",
+                depends_on=["task1"],
+            ),
+        ]
+        updates = [
+            TodoStatusUpdate(todo_id="task1", status="in_progress"),
+            TodoStatusUpdate(todo_id="task2", status="in_progress"),
+        ]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert "No changes applied" in result
+        assert "Cannot start 'Task 2'" in result
+        # Nothing applied, including the otherwise-valid task1 transition.
+        assert storage.todos[0].status == "pending"
+        assert storage.todos[1].status == "pending"
+
+
+class TestUpdateTodoStatusesAsync:
+    """Tests for update_todo_statuses with async storage."""
+
+    @pytest.fixture
+    def storage(self) -> AsyncMemoryStorage:
+        """Create an async storage instance."""
+        return AsyncMemoryStorage()
+
+    @pytest.fixture
+    def toolset(self, storage: AsyncMemoryStorage) -> FunctionToolset[Any]:
+        """Create a toolset with async storage."""
+        return create_todo_toolset(async_storage=storage)
+
+    def test_toolset_has_update_todo_statuses_tool(self, toolset: FunctionToolset[Any]) -> None:
+        """The batch tool is registered on the async toolset."""
+        assert "update_todo_statuses" in toolset.tools
+
+    async def test_batch_complete_and_start(
+        self, storage: AsyncMemoryStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """Complete the current task and start the next in one async call."""
+        await storage.add_todo(
+            Todo(id="todo-a", content="Task A", status="in_progress", active_form="Doing A")
+        )
+        await storage.add_todo(
+            Todo(id="todo-b", content="Task B", status="pending", active_form="Doing B")
+        )
+        updates = [
+            TodoStatusUpdate(todo_id="todo-a", status="completed"),
+            TodoStatusUpdate(todo_id="todo-b", status="in_progress"),
+        ]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        todo_a = await storage.get_todo("todo-a")
+        todo_b = await storage.get_todo("todo-b")
+        assert todo_a is not None and todo_a.status == "completed"
+        assert todo_b is not None and todo_b.status == "in_progress"
+        assert "Updated 2 todos" in result
+
+    async def test_empty_updates(self, toolset: FunctionToolset[Any]) -> None:
+        """An empty async batch is a no-op."""
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=[])  # type: ignore[call-arg]
+        assert "No updates provided" in result
+
+    async def test_unknown_id_applies_nothing(
+        self, storage: AsyncMemoryStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """A bad ID aborts the whole async batch without partial writes."""
+        await storage.add_todo(
+            Todo(id="todo-a", content="Task A", status="pending", active_form="Doing A")
+        )
+        updates = [
+            TodoStatusUpdate(todo_id="todo-a", status="completed"),
+            TodoStatusUpdate(todo_id="missing", status="in_progress"),
+        ]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert "No changes applied" in result
+        assert "Todo with ID 'missing' not found" in result
+        todo_a = await storage.get_todo("todo-a")
+        assert todo_a is not None and todo_a.status == "pending"
+
+    async def test_invalid_status_applies_nothing(
+        self, storage: AsyncMemoryStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """'blocked' without subtasks rejects the async batch."""
+        await storage.add_todo(
+            Todo(id="todo-a", content="Task A", status="pending", active_form="Doing A")
+        )
+        updates = [TodoStatusUpdate(todo_id="todo-a", status="blocked")]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert "Invalid status 'blocked'" in result
+        todo_a = await storage.get_todo("todo-a")
+        assert todo_a is not None and todo_a.status == "pending"
+
+
+class TestUpdateTodoStatusesAsyncSubtasks:
+    """Tests for update_todo_statuses with async storage and subtasks enabled."""
+
+    @pytest.fixture
+    def storage(self) -> AsyncMemoryStorage:
+        """Create an async storage instance."""
+        return AsyncMemoryStorage()
+
+    @pytest.fixture
+    def toolset(self, storage: AsyncMemoryStorage) -> FunctionToolset[Any]:
+        """Create an async toolset with subtasks enabled."""
+        return create_todo_toolset(async_storage=storage, enable_subtasks=True)
+
+    async def test_cannot_start_blocked_dependency(
+        self, storage: AsyncMemoryStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """Async batch refuses to start a task with incomplete dependencies."""
+        await storage.add_todo(
+            Todo(id="task1", content="Task 1", status="pending", active_form="Working")
+        )
+        await storage.add_todo(
+            Todo(
+                id="task2",
+                content="Task 2",
+                status="pending",
+                active_form="Working",
+                depends_on=["task1"],
+            )
+        )
+        updates = [TodoStatusUpdate(todo_id="task2", status="in_progress")]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        assert "No changes applied" in result
+        assert "Cannot start 'Task 2'" in result
+        task2 = await storage.get_todo("task2")
+        assert task2 is not None and task2.status == "pending"
+
+    async def test_blocked_status_allowed(
+        self, storage: AsyncMemoryStorage, toolset: FunctionToolset[Any]
+    ) -> None:
+        """'blocked' is a valid async target status when subtasks are enabled."""
+        await storage.add_todo(
+            Todo(id="task1", content="Task 1", status="pending", active_form="Working")
+        )
+        updates = [TodoStatusUpdate(todo_id="task1", status="blocked")]
+
+        batch = toolset.tools["update_todo_statuses"]
+        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+
+        task1 = await storage.get_todo("task1")
+        assert task1 is not None and task1.status == "blocked"
+        assert "task1] Task 1 → blocked" in result
