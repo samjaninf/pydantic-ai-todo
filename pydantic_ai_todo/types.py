@@ -44,7 +44,12 @@ class TodoItem(BaseModel):
         ..., description="The task description in imperative form (e.g., 'Implement feature X')"
     )
     status: Literal["pending", "in_progress", "completed", "blocked"] = Field(
-        ..., description="Task status: pending, in_progress, completed, or blocked"
+        default="pending",
+        description=(
+            "Task status. Defaults to 'pending' for new tasks — omit it when "
+            "creating a plan. When restructuring an existing list, set it "
+            "explicitly to preserve in-progress/completed tasks."
+        ),
     )
     active_form: str = Field(
         ...,

@@ -5,11 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.5] - unreleased
 
 ### Added
 
 - **Batch status updates (`update_todo_statuses`).** New tool that applies several `{todo_id, status}` transitions in a single call, so an agent can express one logical workflow step — e.g. mark the current task `completed` and the next task `in_progress` — without chaining separate `update_todo_status` calls (and the extra `read_todos` round-trips they encourage). The batch is **all-or-nothing**: it is fully validated first (unknown IDs, invalid statuses, and starting a task with incomplete dependencies all abort the batch with no changes applied), then applied, returning a compact summary of the transitions. Available on both sync and async storage and honours `enable_subtasks` (the `blocked` status and dependency checks). Adds the `TodoStatusUpdate` input model and the `UPDATE_TODO_STATUSES_DESCRIPTION` constant to the public API. Resolves [#32](https://github.com/vstorm-co/pydantic-ai-todo/issues/32).
+
+### Changed
+
+- **`TodoItem.status` now defaults to `"pending"`.** Creating a plan with `write_todos` no longer requires a `status` on every item — a new task is `pending` by definition, so the field can be omitted. This removes the extra validation round-trip that agents previously paid when they left `status` out and had to retry. The field description nudges agents to set `status` explicitly when *restructuring* an existing list (so in-progress/completed tasks are preserved). Resolves [#30](https://github.com/vstorm-co/pydantic-ai-todo/issues/30).
 
 ## [0.2.4] - 2026-06-01
 

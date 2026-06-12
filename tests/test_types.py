@@ -99,6 +99,17 @@ class TestTodoItem:
         assert item.status == "pending"
         assert item.active_form == "Implementing feature X"
 
+    def test_todo_item_status_defaults_to_pending(self) -> None:
+        """status is optional and defaults to 'pending' so plan creation
+        doesn't cost an extra validation round-trip."""
+        item = TodoItem(content="Implement feature X", active_form="Implementing feature X")
+        assert item.status == "pending"
+
+    def test_todo_item_status_not_required_in_schema(self) -> None:
+        """With a default, status must not be advertised as required."""
+        schema = TodoItem.model_json_schema()
+        assert "status" not in schema.get("required", [])
+
     def test_todo_item_field_descriptions(self) -> None:
         """Test that fields have descriptions for LLM guidance."""
         schema = TodoItem.model_json_schema()
