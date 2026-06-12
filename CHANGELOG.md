@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.5] - unreleased
+## [0.2.5]
 
 ### Added
 
@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`TodoItem.status` now defaults to `"pending"`.** Creating a plan with `write_todos` no longer requires a `status` on every item — a new task is `pending` by definition, so the field can be omitted. This removes the extra validation round-trip that agents previously paid when they left `status` out and had to retry. The field description nudges agents to set `status` explicitly when *restructuring* an existing list (so in-progress/completed tasks are preserved). Resolves [#30](https://github.com/vstorm-co/pydantic-ai-todo/issues/30).
+- **`TodoItem.status` now defaults to `"pending"`.** Creating a plan with `write_todos` no longer requires a `status` on every item — a new task is `pending` by definition, so the field can be omitted. This removes the extra validation round-trip that agents previously paid when they left `status` out and had to retry. The field description nudges agents to set `status` explicitly when *restructuring* an existing list (so in-progress/completed tasks are preserved). Resolves [#29](https://github.com/vstorm-co/pydantic-ai-todo/issues/29) and [#30](https://github.com/vstorm-co/pydantic-ai-todo/issues/30).
 
 ## [0.2.4] - 2026-06-01
 
