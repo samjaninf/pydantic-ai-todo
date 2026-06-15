@@ -429,14 +429,19 @@ name = "pydantic-ai-todo"
 version = "0.2.5"
 source = { editable = "." }
 dependencies = [
-    { name = "asyncpg" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim" },
     { name = "redis" },
 ]
 
+[package.optional-dependencies]
+postgres = [
+    { name = "asyncpg" },
+]
+
 [package.dev-dependencies]
 dev = [
+    { name = "asyncpg" },
     { name = "build" },
     { name = "coverage" },
     { name = "pyright" },
@@ -448,14 +453,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asyncpg", specifier = ">=0.29.0" },
+    { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", specifier = ">=1.74.0" },
     { name = "redis", specifier = ">=7.4.0" },
 ]
+provides-extras = ["postgres"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "build", specifier = ">=1.0.0" },
     { name = "coverage", specifier = ">=7.0.0" },
     { name = "pyright", specifier = ">=1.1.0" },
