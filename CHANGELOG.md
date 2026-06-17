@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`asyncpg` is now an optional dependency.** `pip install pydantic-ai-todo` no longer pulls in a Postgres driver — install `pip install 'pydantic-ai-todo[postgres]'` to use `AsyncPostgresStorage`. Users on psycopg3, custom backends, or the in-memory/Redis storage no longer pay the unused-dep cost. `AsyncPostgresStorage.initialize()` raises an `ImportError` with the install hint if the extra is missing. `redis` remains a required dependency; a follow-up may give it the same treatment. Resolves [#19](https://github.com/vstorm-co/pydantic-ai-todo/issues/19).
+
 ## [0.2.5]
 
 ### Added

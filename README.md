@@ -154,6 +154,8 @@ agent = Agent("openai:gpt-4.1", capabilities=[TodoCapability(async_storage=stora
 
 ### PostgreSQL
 
+> Requires the `postgres` extra: `pip install 'pydantic-ai-todo[postgres]'`
+
 ```python
 from pydantic_ai_todo import TodoCapability, create_storage
 

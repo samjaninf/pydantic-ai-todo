@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol, overload, runtime_checkable
 
-import asyncpg
 import redis.asyncio as redis_async
 
 from pydantic_ai_todo.types import Todo
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from pydantic_ai_todo.events import TodoEventEmitter
 
 
@@ -365,6 +366,13 @@ class AsyncPostgresStorage:
         Must be called before using the storage.
         """
         if self._pool is None and self._connection_string:
+            try:
+                import asyncpg
+            except ImportError as e:
+                raise ImportError(
+                    "AsyncPostgresStorage requires the 'postgres' extra. "
+                    "Install it with: pip install 'pydantic-ai-todo[postgres]'"
+                ) from e
             self._pool = await asyncpg.create_pool(self._connection_string)
 
         if self._pool:
