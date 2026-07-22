@@ -42,7 +42,9 @@ result = await agent.run("Create a todo list for building a REST API")
 
 `TodoCapability` automatically:
 - Registers all todo tools (`add_todo`, `read_todos`, `write_todos`, `update_todo_status`, `remove_todo`)
-- Injects dynamic system prompt showing current task state
+- Injects a system prompt section describing the todo workflow (static by default,
+  so todo updates never invalidate the provider's prompt cache; pass
+  `include_current_todos=True` to embed the live task list instead)
 - Creates in-memory storage (or use your own)
 
 ### With Storage Access

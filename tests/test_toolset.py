@@ -3,7 +3,10 @@
 from typing import Any
 
 import pytest
+from pydantic_ai import RunContext
+from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai.usage import RunUsage
 
 from pydantic_ai_todo import (
     AsyncMemoryStorage,
@@ -15,6 +18,11 @@ from pydantic_ai_todo import (
     get_todo_system_prompt,
     get_todo_system_prompt_async,
 )
+
+
+def _ctx(deps: Any = None) -> RunContext[Any]:
+    """Build a minimal RunContext for invoking tool functions directly in tests."""
+    return RunContext(deps=deps, model=TestModel(), usage=RunUsage())
 
 
 class TestCreateTodoToolset:
@@ -85,7 +93,7 @@ class TestReadTodos:
     async def test_read_empty_todos(self, toolset: FunctionToolset[Any]) -> None:
         """Test reading when no todos exist."""
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "No todos" in result
 
     async def test_read_todos_with_items(
@@ -99,7 +107,7 @@ class TestReadTodos:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
 
         assert "Task 1" in result
         assert "Task 2" in result
@@ -123,7 +131,7 @@ class TestReadTodos:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
 
         assert "1 completed" in result
         assert "2 pending" in result
@@ -151,7 +159,7 @@ class TestWriteTodos:
             TodoItem(content="Task 2", status="in_progress", active_form="Working on Task 2"),
         ]
 
-        result = await write_todos.function(todos=items)  # type: ignore[call-arg]
+        result = await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert len(storage.todos) == 2
         assert storage.todos[0].content == "Task 1"
@@ -170,7 +178,7 @@ class TestWriteTodos:
         items = [
             TodoItem(content="New task", status="completed", active_form="Working"),
         ]
-        await write_todos.function(todos=items)  # type: ignore[call-arg]
+        await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert len(storage.todos) == 1
         assert storage.todos[0].content == "New task"
@@ -185,7 +193,7 @@ class TestWriteTodos:
             TodoItem(content="Task 2", status="in_progress", active_form="Working"),
             TodoItem(content="Task 3", status="completed", active_form="Working"),
         ]
-        result = await write_todos.function(todos=items)  # type: ignore[call-arg]
+        result = await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert "3 todos" in result
         assert "1 completed" in result
@@ -201,7 +209,7 @@ class TestWriteTodos:
             TodoItem(id="custom1", content="Task 1", status="pending", active_form="Working"),
             TodoItem(id="custom2", content="Task 2", status="pending", active_form="Working"),
         ]
-        await write_todos.function(todos=items)  # type: ignore[call-arg]
+        await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert len(storage.todos) == 2
         assert storage.todos[0].id == "custom1"
@@ -278,7 +286,9 @@ class TestAddTodo:
     ) -> None:
         """Test adding a todo to an empty list."""
         add_todo = toolset.tools["add_todo"]
-        result = await add_todo.function(content="New task", active_form="Working on new task")  # type: ignore[call-arg]
+        result = await add_todo.function(  # type: ignore[call-arg]
+            _ctx(), content="New task", active_form="Working on new task"
+        )
 
         assert len(storage.todos) == 1
         assert storage.todos[0].content == "New task"
@@ -296,7 +306,7 @@ class TestAddTodo:
         ]
 
         add_todo = toolset.tools["add_todo"]
-        await add_todo.function(content="New task", active_form="Working on new task")  # type: ignore[call-arg]
+        await add_todo.function(_ctx(), content="New task", active_form="Working on new task")  # type: ignore[call-arg]
 
         assert len(storage.todos) == 2
         assert storage.todos[0].content == "Existing task"
@@ -307,7 +317,7 @@ class TestAddTodo:
     ) -> None:
         """Test that add_todo returns the new todo's ID."""
         add_todo = toolset.tools["add_todo"]
-        result = await add_todo.function(content="Task", active_form="Working")  # type: ignore[call-arg]
+        result = await add_todo.function(_ctx(), content="Task", active_form="Working")  # type: ignore[call-arg]
 
         assert "ID:" in result
         assert storage.todos[0].id in result
@@ -334,7 +344,7 @@ class TestUpdateTodoStatus:
         storage.todos = [todo]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="abc123", status="in_progress")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="abc123", status="in_progress")  # type: ignore[call-arg]
 
         assert storage.todos[0].status == "in_progress"
         assert "Updated todo" in result
@@ -348,7 +358,7 @@ class TestUpdateTodoStatus:
         storage.todos = [todo]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="abc123", status="completed")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="abc123", status="completed")  # type: ignore[call-arg]
 
         assert storage.todos[0].status == "completed"
         assert "completed" in result
@@ -361,7 +371,7 @@ class TestUpdateTodoStatus:
         storage.todos = [todo]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="abc123", status="pending")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="abc123", status="pending")  # type: ignore[call-arg]
 
         assert storage.todos[0].status == "pending"
         assert "pending" in result
@@ -371,7 +381,7 @@ class TestUpdateTodoStatus:
     ) -> None:
         """Test updating status for non-existent todo in empty list."""
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="nonexistent", status="completed")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="nonexistent", status="completed")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -385,7 +395,7 @@ class TestUpdateTodoStatus:
         ]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="nonexistent", status="completed")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="nonexistent", status="completed")  # type: ignore[call-arg]
 
         assert "not found" in result
         # Verify other todos unchanged
@@ -400,7 +410,7 @@ class TestUpdateTodoStatus:
         storage.todos = [todo]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="abc123", status="invalid")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="abc123", status="invalid")  # type: ignore[call-arg]
 
         assert "Invalid status" in result
         assert storage.todos[0].status == "pending"  # unchanged
@@ -427,7 +437,7 @@ class TestRemoveTodo:
         storage.todos = [todo]
 
         remove_todo = toolset.tools["remove_todo"]
-        result = await remove_todo.function(todo_id="abc123")  # type: ignore[call-arg]
+        result = await remove_todo.function(_ctx(), todo_id="abc123")  # type: ignore[call-arg]
 
         assert len(storage.todos) == 0
         assert "Removed todo" in result
@@ -444,7 +454,7 @@ class TestRemoveTodo:
         ]
 
         remove_todo = toolset.tools["remove_todo"]
-        await remove_todo.function(todo_id="id2")  # type: ignore[call-arg]
+        await remove_todo.function(_ctx(), todo_id="id2")  # type: ignore[call-arg]
 
         assert len(storage.todos) == 2
         assert storage.todos[0].id == "id1"
@@ -455,7 +465,7 @@ class TestRemoveTodo:
     ) -> None:
         """Test removing a non-existent todo."""
         remove_todo = toolset.tools["remove_todo"]
-        result = await remove_todo.function(todo_id="nonexistent")  # type: ignore[call-arg]
+        result = await remove_todo.function(_ctx(), todo_id="nonexistent")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -488,7 +498,7 @@ class TestAsyncStorageToolset:
     async def test_read_empty_todos(self, toolset: FunctionToolset[Any]) -> None:
         """Test reading when no todos exist."""
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "No todos" in result
 
     async def test_write_and_read_todos(
@@ -500,7 +510,7 @@ class TestAsyncStorageToolset:
             TodoItem(content="Task 1", status="pending", active_form="Working on Task 1"),
             TodoItem(content="Task 2", status="in_progress", active_form="Working on Task 2"),
         ]
-        await write_todos.function(todos=items)  # type: ignore[call-arg]
+        await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         # Verify in storage
         todos = await storage.get_todos()
@@ -510,7 +520,7 @@ class TestAsyncStorageToolset:
 
         # Verify via read
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "Task 1" in result
         assert "Task 2" in result
 
@@ -519,7 +529,7 @@ class TestAsyncStorageToolset:
     ) -> None:
         """Test adding a todo with async storage."""
         add_todo = toolset.tools["add_todo"]
-        result = await add_todo.function(content="New task", active_form="Working")  # type: ignore[call-arg]
+        result = await add_todo.function(_ctx(), content="New task", active_form="Working")  # type: ignore[call-arg]
 
         assert "Added todo" in result
         todos = await storage.get_todos()
@@ -535,7 +545,7 @@ class TestAsyncStorageToolset:
         await storage.add_todo(todo)
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="test123", status="completed")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="test123", status="completed")  # type: ignore[call-arg]
 
         assert "Updated todo" in result
         updated = await storage.get_todo("test123")
@@ -545,7 +555,7 @@ class TestAsyncStorageToolset:
     async def test_update_todo_status_not_found(self, toolset: FunctionToolset[Any]) -> None:
         """Test updating non-existent todo."""
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="nonexistent", status="completed")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="nonexistent", status="completed")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -558,7 +568,7 @@ class TestAsyncStorageToolset:
         await storage.add_todo(todo)
 
         remove_todo = toolset.tools["remove_todo"]
-        result = await remove_todo.function(todo_id="test123")  # type: ignore[call-arg]
+        result = await remove_todo.function(_ctx(), todo_id="test123")  # type: ignore[call-arg]
 
         assert "Removed todo" in result
         assert "test123" in result
@@ -569,7 +579,7 @@ class TestAsyncStorageToolset:
     async def test_remove_todo_not_found(self, toolset: FunctionToolset[Any]) -> None:
         """Test removing non-existent todo."""
         remove_todo = toolset.tools["remove_todo"]
-        result = await remove_todo.function(todo_id="nonexistent")  # type: ignore[call-arg]
+        result = await remove_todo.function(_ctx(), todo_id="nonexistent")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -582,7 +592,7 @@ class TestAsyncStorageToolset:
             TodoItem(id="custom1", content="Task 1", status="pending", active_form="Working"),
             TodoItem(id="custom2", content="Task 2", status="pending", active_form="Working"),
         ]
-        await write_todos.function(todos=items)  # type: ignore[call-arg]
+        await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         todos = await storage.get_todos()
         assert len(todos) == 2
@@ -691,7 +701,7 @@ class TestAddSubtask:
         storage.todos = [parent]
 
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(
+        result = await add_subtask.function(_ctx(),
             parent_id="parent1",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working on subtask",
@@ -706,7 +716,7 @@ class TestAddSubtask:
     async def test_add_subtask_parent_not_found(self, toolset: FunctionToolset[Any]) -> None:
         """Test adding subtask to non-existent parent."""
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(
+        result = await add_subtask.function(_ctx(),
             parent_id="nonexistent",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working",
@@ -737,7 +747,7 @@ class TestSetDependency:
         storage.todos = [todo1, todo2]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "Added dependency" in result
         assert "task1" in storage.todos[1].depends_on
@@ -751,7 +761,7 @@ class TestSetDependency:
         storage.todos = [todo1, todo2]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "blocked" in result.lower()
         assert storage.todos[1].status == "blocked"
@@ -765,7 +775,7 @@ class TestSetDependency:
         storage.todos = [todo1, todo2]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "blocked" not in result.lower()
         assert storage.todos[1].status == "pending"
@@ -778,7 +788,7 @@ class TestSetDependency:
         storage.todos = [todo]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task1", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task1", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "cannot depend on itself" in result.lower()
 
@@ -797,7 +807,7 @@ class TestSetDependency:
         storage.todos = [todo1, todo2]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "cycle" in result.lower()
 
@@ -824,7 +834,7 @@ class TestSetDependency:
         storage.todos = [todo1, todo2, todo3]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task3", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task3", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "cycle" in result.lower()
 
@@ -858,7 +868,7 @@ class TestSetDependency:
 
         # Adding D -> A would create a cycle through both B and C
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="D", depends_on_id="A")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="D", depends_on_id="A")  # type: ignore[call-arg]
 
         assert "cycle" in result.lower()
 
@@ -900,7 +910,7 @@ class TestSetDependency:
         # Adding F -> A is allowed (no cycle) - F is unrelated to A's dependency graph
         # Traversal from A: A -> B -> D (visited) -> C -> D (already visited!)
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="F", depends_on_id="A")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="F", depends_on_id="A")  # type: ignore[call-arg]
 
         # Should succeed (no cycle detected)
         assert "Added dependency" in result
@@ -928,7 +938,7 @@ class TestSetDependency:
 
         # Adding C -> A should traverse A's dependencies, hit "nonexistent" (not found), continue
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="C", depends_on_id="A")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="C", depends_on_id="A")  # type: ignore[call-arg]
 
         # Should succeed (no cycle)
         assert "Added dependency" in result
@@ -948,14 +958,14 @@ class TestSetDependency:
         storage.todos = [todo1, todo2]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "already exists" in result.lower()
 
     async def test_set_dependency_todo_not_found(self, toolset: FunctionToolset[Any]) -> None:
         """Test dependency when todo not found."""
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="nonexistent", depends_on_id="other")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="nonexistent", depends_on_id="other")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -967,7 +977,7 @@ class TestSetDependency:
         storage.todos = [todo]
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task1", depends_on_id="nonexistent")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task1", depends_on_id="nonexistent")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -995,7 +1005,7 @@ class TestGetAvailableTasks:
         ]
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "Task 1" in result
         assert "Task 2" in result
@@ -1010,7 +1020,7 @@ class TestGetAvailableTasks:
         ]
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "Task 1" in result
         assert "Task 2" not in result
@@ -1025,7 +1035,7 @@ class TestGetAvailableTasks:
         ]
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "Task 1" not in result
         assert "Task 2" in result
@@ -1046,7 +1056,7 @@ class TestGetAvailableTasks:
         ]
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "Task 1" in result
         assert "Task 2" not in result
@@ -1060,7 +1070,7 @@ class TestGetAvailableTasks:
         ]
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "No available tasks" in result
 
@@ -1094,7 +1104,7 @@ class TestReadTodosHierarchical:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function(hierarchical=False)  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx(), hierarchical=False)  # type: ignore[call-arg]
 
         assert "Parent" in result
         assert "Child" in result
@@ -1116,7 +1126,7 @@ class TestReadTodosHierarchical:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function(hierarchical=True)  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx(), hierarchical=True)  # type: ignore[call-arg]
 
         assert "hierarchical view" in result.lower()
         assert "Parent" in result
@@ -1140,7 +1150,7 @@ class TestReadTodosHierarchical:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function(hierarchical=True)  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx(), hierarchical=True)  # type: ignore[call-arg]
 
         assert "depends on: task3" in result
 
@@ -1167,7 +1177,7 @@ class TestReadTodosHierarchical:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function(hierarchical=True)  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx(), hierarchical=True)  # type: ignore[call-arg]
 
         assert "Root" in result
         assert "Level 1" in result
@@ -1176,7 +1186,7 @@ class TestReadTodosHierarchical:
     async def test_read_todos_empty_with_subtasks(self, toolset: FunctionToolset[Any]) -> None:
         """Test reading empty todo list with subtasks enabled."""
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "No todos" in result
 
     async def test_read_todos_shows_blocked_status(
@@ -1188,7 +1198,7 @@ class TestReadTodosHierarchical:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
 
         assert "[!]" in result
         assert "blocked" in result.lower()
@@ -1209,7 +1219,7 @@ class TestReadTodosHierarchical:
         ]
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
 
         assert "depends on: task1" in result
 
@@ -1242,7 +1252,7 @@ class TestWriteTodosWithSubtasks:
                 parent_id="task1",
             ),
         ]
-        await write_todos.function(todos=items)  # type: ignore[call-arg]
+        await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert len(storage.todos) == 2
         assert storage.todos[1].parent_id == "task1"
@@ -1262,7 +1272,7 @@ class TestWriteTodosWithSubtasks:
                 depends_on=["task1"],
             ),
         ]
-        await write_todos.function(todos=items)  # type: ignore[call-arg]
+        await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert len(storage.todos) == 2
         assert storage.todos[1].depends_on == ["task1"]
@@ -1276,7 +1286,7 @@ class TestWriteTodosWithSubtasks:
             TodoItem(id="task1", content="Blocked", status="blocked", active_form="Working"),
             TodoItem(id="task2", content="Pending", status="pending", active_form="Working"),
         ]
-        result = await write_todos.function(todos=items)  # type: ignore[call-arg]
+        result = await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert "1 blocked" in result
 
@@ -1302,7 +1312,7 @@ class TestUpdateTodoStatusWithSubtasks:
         storage.todos = [todo]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task1", status="blocked")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task1", status="blocked")  # type: ignore[call-arg]
 
         assert storage.todos[0].status == "blocked"
         assert "blocked" in result
@@ -1322,7 +1332,7 @@ class TestUpdateTodoStatusWithSubtasks:
         storage.todos = [todo1, todo2]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task2", status="in_progress")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task2", status="in_progress")  # type: ignore[call-arg]
 
         assert "Cannot start" in result
         assert "incomplete dependencies" in result
@@ -1343,7 +1353,7 @@ class TestUpdateTodoStatusWithSubtasks:
         storage.todos = [todo1, todo2]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task2", status="in_progress")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task2", status="in_progress")  # type: ignore[call-arg]
 
         assert storage.todos[1].status == "in_progress"
         assert "in_progress" in result
@@ -1356,7 +1366,7 @@ class TestUpdateTodoStatusWithSubtasks:
         storage.todos = [todo]
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task1", status="invalid")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task1", status="invalid")  # type: ignore[call-arg]
 
         assert "Invalid status" in result
 
@@ -1388,7 +1398,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(parent)
 
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(
+        result = await add_subtask.function(_ctx(),
             parent_id="parent1",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working",
@@ -1402,7 +1412,7 @@ class TestAsyncSubtasksToolset:
     async def test_add_subtask_parent_not_found_async(self, toolset: FunctionToolset[Any]) -> None:
         """Test adding subtask to non-existent parent with async storage."""
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(
+        result = await add_subtask.function(_ctx(),
             parent_id="nonexistent",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working",
@@ -1420,7 +1430,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo2)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "Added dependency" in result
         todo = await storage.get_todo("task2")
@@ -1435,7 +1445,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task1", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task1", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "cannot depend on itself" in result.lower()
 
@@ -1455,7 +1465,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo2)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "cycle" in result.lower()
 
@@ -1492,7 +1502,7 @@ class TestAsyncSubtasksToolset:
 
         # Adding D -> A would create a cycle through both B and C
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="D", depends_on_id="A")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="D", depends_on_id="A")  # type: ignore[call-arg]
 
         assert "cycle" in result.lower()
 
@@ -1534,7 +1544,7 @@ class TestAsyncSubtasksToolset:
 
         # Adding F -> A is allowed (no cycle)
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="F", depends_on_id="A")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="F", depends_on_id="A")  # type: ignore[call-arg]
 
         # Should succeed
         assert "Added dependency" in result
@@ -1558,7 +1568,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo_c)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="C", depends_on_id="A")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="C", depends_on_id="A")  # type: ignore[call-arg]
 
         assert "Added dependency" in result
 
@@ -1578,14 +1588,14 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo2)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "already exists" in result.lower()
 
     async def test_set_dependency_not_found_async(self, toolset: FunctionToolset[Any]) -> None:
         """Test dependency when todo not found with async storage."""
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="nonexistent", depends_on_id="other")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="nonexistent", depends_on_id="other")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -1597,7 +1607,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task1", depends_on_id="nonexistent")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task1", depends_on_id="nonexistent")  # type: ignore[call-arg]
 
         assert "not found" in result
 
@@ -1611,7 +1621,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo2)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "blocked" in result.lower()
         todo = await storage.get_todo("task2")
@@ -1628,7 +1638,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo2)
 
         set_dep = toolset.tools["set_dependency"]
-        result = await set_dep.function(todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
+        result = await set_dep.function(_ctx(), todo_id="task2", depends_on_id="task1")  # type: ignore[call-arg]
 
         assert "blocked" not in result.lower()
         todo = await storage.get_todo("task2")
@@ -1647,7 +1657,7 @@ class TestAsyncSubtasksToolset:
         )
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "Available" in result
         assert "Blocked" not in result
@@ -1670,7 +1680,7 @@ class TestAsyncSubtasksToolset:
         )
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "Available" in result
         assert "Dependent" not in result
@@ -1684,7 +1694,7 @@ class TestAsyncSubtasksToolset:
         )
 
         get_available = toolset.tools["get_available_tasks"]
-        result = await get_available.function()  # type: ignore[call-arg]
+        result = await get_available.function(_ctx())  # type: ignore[call-arg]
 
         assert "No available tasks" in result
 
@@ -1706,7 +1716,7 @@ class TestAsyncSubtasksToolset:
         )
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function(hierarchical=True)  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx(), hierarchical=True)  # type: ignore[call-arg]
 
         assert "hierarchical view" in result.lower()
         assert "Parent" in result
@@ -1731,7 +1741,7 @@ class TestAsyncSubtasksToolset:
         )
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function(hierarchical=False)  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx(), hierarchical=False)  # type: ignore[call-arg]
 
         assert "subtask of: task1" in result
         assert "depends on: task1" in result
@@ -1739,7 +1749,7 @@ class TestAsyncSubtasksToolset:
     async def test_read_todos_empty_async(self, toolset: FunctionToolset[Any]) -> None:
         """Test reading empty todo list with async storage."""
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "No todos" in result
 
     async def test_read_todos_with_blocked_shows_in_summary_async(
@@ -1754,7 +1764,7 @@ class TestAsyncSubtasksToolset:
         )
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
 
         assert "1 blocked" in result
         assert "[!]" in result  # blocked icon
@@ -1781,7 +1791,7 @@ class TestAsyncSubtasksToolset:
         )
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function(hierarchical=True)  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx(), hierarchical=True)  # type: ignore[call-arg]
 
         assert "depends on: task3" in result
 
@@ -1806,7 +1816,7 @@ class TestAsyncSubtasksToolset:
                 depends_on=["task1"],
             ),
         ]
-        result = await write_todos.function(todos=items)  # type: ignore[call-arg]
+        result = await write_todos.function(_ctx(), todos=items)  # type: ignore[call-arg]
 
         assert "1 blocked" in result
         todos = await storage.get_todos()
@@ -1822,7 +1832,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo)
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task1", status="blocked")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task1", status="blocked")  # type: ignore[call-arg]
 
         assert "blocked" in result
         updated = await storage.get_todo("task1")
@@ -1845,7 +1855,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo2)
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task2", status="in_progress")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task2", status="in_progress")  # type: ignore[call-arg]
 
         assert "Cannot start" in result
         updated = await storage.get_todo("task2")
@@ -1871,7 +1881,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo2)
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task2", status="in_progress")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task2", status="in_progress")  # type: ignore[call-arg]
 
         # Should succeed
         assert "in_progress" in result
@@ -1887,7 +1897,7 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(todo)
 
         update_status = toolset.tools["update_todo_status"]
-        result = await update_status.function(todo_id="task1", status="invalid")  # type: ignore[call-arg]
+        result = await update_status.function(_ctx(), todo_id="task1", status="invalid")  # type: ignore[call-arg]
 
         assert "Invalid status" in result
 
@@ -1904,7 +1914,7 @@ class TestReadTodosAllCompletedHint:
             Todo(id="1", content="Done", status="completed", active_form="Done"),
         ]
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "Do NOT call read_todos again" in result
 
     async def test_sync_not_all_completed_no_hint(self) -> None:
@@ -1917,7 +1927,7 @@ class TestReadTodosAllCompletedHint:
             Todo(id="2", content="Todo", status="pending", active_form="Doing"),
         ]
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "Do NOT call read_todos again" not in result
 
     async def test_sync_subtasks_all_completed_shows_hint(self) -> None:
@@ -1929,7 +1939,7 @@ class TestReadTodosAllCompletedHint:
             Todo(id="1", content="Done", status="completed", active_form="Done"),
         ]
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "Do NOT call read_todos again" in result
 
     async def test_async_all_completed_shows_hint(self) -> None:
@@ -1941,7 +1951,7 @@ class TestReadTodosAllCompletedHint:
         await storage.add_todo(todo)
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "Do NOT call read_todos again" in result
 
     async def test_async_subtasks_all_completed_shows_hint(self) -> None:
@@ -1953,7 +1963,7 @@ class TestReadTodosAllCompletedHint:
         await storage.add_todo(todo)
 
         read_todos = toolset.tools["read_todos"]
-        result = await read_todos.function()  # type: ignore[call-arg]
+        result = await read_todos.function(_ctx())  # type: ignore[call-arg]
         assert "Do NOT call read_todos again" in result
 
 
@@ -1988,7 +1998,7 @@ class TestUpdateTodoStatuses:
         ]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert storage.todos[0].status == "completed"
         assert storage.todos[1].status == "in_progress"
@@ -1999,7 +2009,7 @@ class TestUpdateTodoStatuses:
     async def test_empty_updates(self, toolset: FunctionToolset[Any]) -> None:
         """An empty batch is a no-op with a clear message."""
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=[])  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=[])  # type: ignore[call-arg]
         assert "No updates provided" in result
 
     async def test_unknown_id_applies_nothing(
@@ -2015,7 +2025,7 @@ class TestUpdateTodoStatuses:
         ]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert "No changes applied" in result
         assert "Todo with ID 'missing' not found" in result
@@ -2032,7 +2042,7 @@ class TestUpdateTodoStatuses:
         updates = [TodoStatusUpdate(todo_id="todo-a", status="blocked")]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert "No changes applied" in result
         assert "Invalid status 'blocked'" in result
@@ -2062,7 +2072,7 @@ class TestUpdateTodoStatusesWithSubtasks:
         updates = [TodoStatusUpdate(todo_id="task1", status="blocked")]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert storage.todos[0].status == "blocked"
         assert "task1] Task 1 → blocked" in result
@@ -2087,7 +2097,7 @@ class TestUpdateTodoStatusesWithSubtasks:
         ]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert "No changes applied" in result
         assert "Cannot start 'Task 2'" in result
@@ -2129,7 +2139,7 @@ class TestUpdateTodoStatusesAsync:
         ]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         todo_a = await storage.get_todo("todo-a")
         todo_b = await storage.get_todo("todo-b")
@@ -2140,7 +2150,7 @@ class TestUpdateTodoStatusesAsync:
     async def test_empty_updates(self, toolset: FunctionToolset[Any]) -> None:
         """An empty async batch is a no-op."""
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=[])  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=[])  # type: ignore[call-arg]
         assert "No updates provided" in result
 
     async def test_unknown_id_applies_nothing(
@@ -2156,7 +2166,7 @@ class TestUpdateTodoStatusesAsync:
         ]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert "No changes applied" in result
         assert "Todo with ID 'missing' not found" in result
@@ -2173,7 +2183,7 @@ class TestUpdateTodoStatusesAsync:
         updates = [TodoStatusUpdate(todo_id="todo-a", status="blocked")]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert "Invalid status 'blocked'" in result
         todo_a = await storage.get_todo("todo-a")
@@ -2212,7 +2222,7 @@ class TestUpdateTodoStatusesAsyncSubtasks:
         updates = [TodoStatusUpdate(todo_id="task2", status="in_progress")]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         assert "No changes applied" in result
         assert "Cannot start 'Task 2'" in result
@@ -2229,8 +2239,59 @@ class TestUpdateTodoStatusesAsyncSubtasks:
         updates = [TodoStatusUpdate(todo_id="task1", status="blocked")]
 
         batch = toolset.tools["update_todo_statuses"]
-        result = await batch.function(updates=updates)  # type: ignore[call-arg]
+        result = await batch.function(_ctx(), updates=updates)  # type: ignore[call-arg]
 
         task1 = await storage.get_todo("task1")
         assert task1 is not None and task1.status == "blocked"
         assert "task1] Task 1 → blocked" in result
+
+
+class TestStorageResolver:
+    """Per-run storage resolution via storage_resolver / async_storage_resolver."""
+
+    async def test_sync_resolver_reads_and_writes_per_run_storage(self) -> None:
+        """A sync resolver resolves storage from RunContext deps for each call."""
+        run_storage = TodoStorage()
+        # Closure storage is a distinct object that must NOT be used.
+        closure_storage = TodoStorage()
+        toolset = create_todo_toolset(
+            storage=closure_storage,
+            storage_resolver=lambda ctx: ctx.deps,
+        )
+
+        write_todos = toolset.tools["write_todos"]
+        await write_todos.function(  # type: ignore[call-arg]
+            _ctx(deps=run_storage),
+            todos=[TodoItem(content="Resolved task", active_form="Working", status="pending")],
+        )
+
+        # Written through the resolved storage, not the closure default.
+        assert len(run_storage.todos) == 1
+        assert run_storage.todos[0].content == "Resolved task"
+        assert closure_storage.todos == []
+
+        read_todos = toolset.tools["read_todos"]
+        result = await read_todos.function(_ctx(deps=run_storage))  # type: ignore[call-arg]
+        assert "Resolved task" in result
+
+    async def test_async_resolver_reads_and_writes_per_run_storage(self) -> None:
+        """An async resolver resolves storage from RunContext deps for each call."""
+        run_storage = AsyncMemoryStorage()
+        closure_storage = AsyncMemoryStorage()
+        toolset = create_todo_toolset(
+            async_storage=closure_storage,
+            async_storage_resolver=lambda ctx: ctx.deps,
+        )
+
+        add_todo = toolset.tools["add_todo"]
+        await add_todo.function(  # type: ignore[call-arg]
+            _ctx(deps=run_storage), content="Resolved async task", active_form="Working"
+        )
+
+        assert len(await run_storage.get_todos()) == 1
+        assert (await run_storage.get_todos())[0].content == "Resolved async task"
+        assert await closure_storage.get_todos() == []
+
+        read_todos = toolset.tools["read_todos"]
+        result = await read_todos.function(_ctx(deps=run_storage))  # type: ignore[call-arg]
+        assert "Resolved async task" in result

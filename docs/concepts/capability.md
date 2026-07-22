@@ -9,7 +9,8 @@ tools and instructions into a single plug-and-play unit.
 | Feature | TodoCapability | create_todo_toolset |
 |---------|:-:|:-:|
 | Tools registered automatically | Yes | Yes |
-| Dynamic system prompt (shows current todos) | Yes | Manual wiring |
+| System prompt section | Yes | Manual wiring |
+| Live todo list in prompt (opt-in) | `include_current_todos=True` | Manual wiring |
 | AgentSpec YAML support | Yes | No |
 | Single import | Yes | Need toolset + prompt function |
 
@@ -29,6 +30,7 @@ TodoCapability(
     storage=TodoStorage(),              # Sync storage backend
     async_storage=AsyncMemoryStorage(), # Async storage backend
     enable_subtasks=True,               # Enable subtask tools
+    include_current_todos=True,         # Inject live todo list into the prompt
     descriptions={                      # Override tool descriptions
         "read_todos": "Check progress",
     },
@@ -47,24 +49,32 @@ at construction time:
    (`read_todos`, `write_todos`, `add_todo`, `update_todo_status`, `remove_todo`,
    and optionally `add_subtask`, `set_dependency`, `get_available_tasks`)
 
-2. **`get_instructions()`** — returns the system prompt. The exact behavior
-   depends on which storage you configured:
+2. **`get_instructions()`** — returns the system prompt. By default this is the
+   **static** `TODO_SYSTEM_PROMPT` constant, which describes the tools and the
+   workflow but does not embed the todo list itself. The model sees the current
+   state through the mutating tools' return values and `read_todos`.
 
-    - **With sync `storage`:** returns a callable invoked per-run that builds the
-      prompt from the *current* todo list via
-      [`get_todo_system_prompt`][pydantic_ai_todo.get_todo_system_prompt], so the
-      model always sees the latest tasks.
-    - **With only `async_storage` (no sync `storage`):** returns the **static**
-      `TODO_SYSTEM_PROMPT` constant — the live todo
-      list is **not** injected into the system prompt (the capability does not
-      `await` async storage from the sync `get_instructions()` hook). The model
-      still sees current todos by calling `read_todos`.
+    With `include_current_todos=True` and sync `storage`, it instead returns a
+    callable invoked per model request that appends the *current* todo list via
+    [`get_todo_system_prompt`][pydantic_ai_todo.get_todo_system_prompt].
+
+    !!! warning "Prompt caching"
+
+        The system prompt is the very start of the provider's prompt-cache
+        prefix. With `include_current_todos=True`, every status change rewrites
+        it — invalidating the entire cached prefix, including mid-run after each
+        mutating tool call. On cached workloads this can raise input-token cost
+        several-fold ([#41](https://github.com/vstorm-co/pydantic-ai-todo/issues/41)).
+        The live list is largely redundant anyway: every mutating tool already
+        returns the updated state into the append-only (cache-friendly) message
+        history. Prefer the default unless you have a specific reason.
 
     !!! note "Dynamic injection needs sync storage"
 
-        If you want the current task list embedded in the system prompt on every
-        run, use sync `storage`. With async-only storage, rely on the `read_todos`
-        tool (or build the prompt yourself with
+        `include_current_todos=True` requires sync `storage` — the capability
+        cannot `await` async storage from the sync `get_instructions()` hook.
+        With async-only storage the prompt stays static; rely on the
+        `read_todos` tool (or build the prompt yourself with
         [`get_todo_system_prompt_async`][pydantic_ai_todo.get_todo_system_prompt_async]).
 
 ## Composing with Other Capabilities

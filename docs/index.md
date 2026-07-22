@@ -38,8 +38,10 @@ agent = Agent("openai:gpt-4.1", capabilities=[TodoCapability()])
 result = await agent.run("Create a todo list for building a REST API")
 ```
 
-`TodoCapability` automatically registers all tools and injects a dynamic system
-prompt showing the current task state. No manual wiring needed.
+`TodoCapability` automatically registers all tools and injects a system prompt
+section describing the todo workflow. No manual wiring needed. The prompt is
+static by default so todo updates never break the provider's prompt cache —
+pass `include_current_todos=True` to embed the live task list instead.
 
 ### Alternative: Toolset API
 

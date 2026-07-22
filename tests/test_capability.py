@@ -55,24 +55,47 @@ class TestTodoCapability:
         toolset = cap.get_toolset()
         assert toolset is not None
 
-    def test_get_instructions_with_sync_storage(self):
-        """get_instructions returns callable with sync storage."""
+    def test_get_instructions_static_by_default(self):
+        """Default instructions are the static prompt, even with sync storage."""
         storage = TodoStorage()
         cap = TodoCapability(storage=storage)
+        instructions = cap.get_instructions()
+        assert instructions == TODO_SYSTEM_PROMPT
+
+    def test_static_instructions_stable_across_mutations(self):
+        """The static prompt does not change when todos are mutated (cache-safe)."""
+        storage = TodoStorage()
+        cap = TodoCapability(storage=storage)
+        before = cap.get_instructions()
+        storage.todos = [
+            Todo(
+                id="1",
+                content="Write tests",
+                status="in_progress",
+                active_form="Writing tests",
+            )
+        ]
+        assert cap.get_instructions() == before
+        assert "Write tests" not in before
+
+    def test_get_instructions_dynamic_with_opt_in(self):
+        """include_current_todos=True returns a per-request callable."""
+        storage = TodoStorage()
+        cap = TodoCapability(storage=storage, include_current_todos=True)
         instructions = cap.get_instructions()
         assert callable(instructions)
 
     def test_get_instructions_without_sync_storage(self):
         """get_instructions returns static string without sync storage."""
-        cap = TodoCapability(async_storage=AsyncMemoryStorage())
+        cap = TodoCapability(async_storage=AsyncMemoryStorage(), include_current_todos=True)
         instructions = cap.get_instructions()
         assert instructions == TODO_SYSTEM_PROMPT
 
     def test_instructions_reflect_current_todos(self):
-        """Dynamic instructions show current todo state."""
+        """Opted-in dynamic instructions show current todo state."""
 
         storage = TodoStorage()
-        cap = TodoCapability(storage=storage)
+        cap = TodoCapability(storage=storage, include_current_todos=True)
         instructions_fn = cap.get_instructions()
 
         ctx = type("FakeCtx", (), {"deps": None})()

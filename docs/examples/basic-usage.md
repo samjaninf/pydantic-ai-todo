@@ -134,9 +134,9 @@ agent = Agent(
 ```
 
 !!! note
-    With `TodoCapability`, the system prompt is injected dynamically and always
-    reflects the current todo state. With the toolset API, you need to wire this
-    manually.
+    With `TodoCapability`, the system prompt section is injected automatically
+    (static by default; pass `include_current_todos=True` to embed the live
+    todo state). With the toolset API, you need to wire this manually.
 
 ## Next Steps
 

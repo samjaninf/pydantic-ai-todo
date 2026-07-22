@@ -79,7 +79,7 @@ You'll need an API key for your LLM provider. For OpenAI:
 The package provides:
 
 - [`create_todo_toolset()`][pydantic_ai_todo.create_todo_toolset] — Factory function to create the toolset
-- [`TodoCapability`][pydantic_ai_todo.TodoCapability] — Capability bundling the toolset with dynamic instructions (recommended)
+- [`TodoCapability`][pydantic_ai_todo.TodoCapability] — Capability bundling the toolset with a system prompt section (recommended)
 - [`get_todo_system_prompt()`][pydantic_ai_todo.get_todo_system_prompt] / [`get_todo_system_prompt_async()`][pydantic_ai_todo.get_todo_system_prompt_async] — Build the system prompt with the current todo list
 - [`TodoStorage`][pydantic_ai_todo.TodoStorage] — Sync in-memory storage
 - [`AsyncMemoryStorage`][pydantic_ai_todo.AsyncMemoryStorage] — Async in-memory storage
