@@ -701,7 +701,8 @@ class TestAddSubtask:
         storage.todos = [parent]
 
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(_ctx(),
+        result = await add_subtask.function(
+            _ctx(),
             parent_id="parent1",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working on subtask",
@@ -716,7 +717,8 @@ class TestAddSubtask:
     async def test_add_subtask_parent_not_found(self, toolset: FunctionToolset[Any]) -> None:
         """Test adding subtask to non-existent parent."""
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(_ctx(),
+        result = await add_subtask.function(
+            _ctx(),
             parent_id="nonexistent",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working",
@@ -1398,7 +1400,8 @@ class TestAsyncSubtasksToolset:
         await storage.add_todo(parent)
 
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(_ctx(),
+        result = await add_subtask.function(
+            _ctx(),
             parent_id="parent1",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working",
@@ -1412,7 +1415,8 @@ class TestAsyncSubtasksToolset:
     async def test_add_subtask_parent_not_found_async(self, toolset: FunctionToolset[Any]) -> None:
         """Test adding subtask to non-existent parent with async storage."""
         add_subtask = toolset.tools["add_subtask"]
-        result = await add_subtask.function(_ctx(),
+        result = await add_subtask.function(
+            _ctx(),
             parent_id="nonexistent",  # pyright: ignore[reportCallIssue]
             content="Subtask",
             active_form="Working",

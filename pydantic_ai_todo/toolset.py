@@ -635,9 +635,7 @@ def _create_sync_toolset(
     @toolset.tool(
         description=_descs.get("update_todo_statuses", UPDATE_TODO_STATUSES_DESCRIPTION),
     )
-    async def update_todo_statuses(
-        ctx: RunContext[Any], updates: list[TodoStatusUpdate]
-    ) -> str:
+    async def update_todo_statuses(ctx: RunContext[Any], updates: list[TodoStatusUpdate]) -> str:
         """Update the status of several todos atomically.
 
         The whole batch is validated before any change is applied: if any entry
@@ -844,9 +842,7 @@ def _create_async_toolset(
         """Find a todo by its ID."""
         return await store.get_todo(todo_id)
 
-    async def _has_cycle(
-        store: AsyncTodoStorageProtocol, todo_id: str, depends_on_id: str
-    ) -> bool:
+    async def _has_cycle(store: AsyncTodoStorageProtocol, todo_id: str, depends_on_id: str) -> bool:
         """Check if adding a dependency would create a cycle."""
         todos = await store.get_todos()
         todos_map = {t.id: t for t in todos}
@@ -1079,9 +1075,7 @@ def _create_async_toolset(
     @toolset.tool(
         description=_descs.get("update_todo_statuses", UPDATE_TODO_STATUSES_DESCRIPTION),
     )
-    async def update_todo_statuses(
-        ctx: RunContext[Any], updates: list[TodoStatusUpdate]
-    ) -> str:
+    async def update_todo_statuses(ctx: RunContext[Any], updates: list[TodoStatusUpdate]) -> str:
         """Update the status of several todos atomically.
 
         The whole batch is validated before any change is applied: if any entry
