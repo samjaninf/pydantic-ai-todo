@@ -7,7 +7,7 @@
 │                     Your Agent                           │
 │  ┌────────────────────────────────────────────────────┐  │
 │  │           TodoCapability (recommended)             │  │
-│  │  tools + dynamic instructions — auto-configured    │  │
+│  │  tools + prompt section — auto-configured          │  │
 │  └────────────────────────────────────────────────────┘  │
 │                         │                                │
 │  ┌────────────────────────────────────────────────────┐  │
@@ -31,7 +31,7 @@
 
 ### [TodoCapability](capability.md) (Recommended)
 
-The capability bundles tools + dynamic instructions into a single unit:
+The capability bundles tools + a system prompt section into a single unit:
 
 ```python
 from pydantic_ai import Agent
@@ -41,7 +41,8 @@ agent = Agent("openai:gpt-4.1", capabilities=[TodoCapability()])
 ```
 
 - Registers all tools automatically
-- Injects dynamic system prompt with current todo state
+- Injects a static, cache-friendly system prompt section
+  (opt into the live todo list with `include_current_todos=True`)
 - Supports YAML agent definitions via AgentSpec
 
 ### [Toolset](toolset.md) (Lower-level)

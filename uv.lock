@@ -426,7 +426,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-ai-todo"
-version = "0.2.5"
+version = "0.2.7"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

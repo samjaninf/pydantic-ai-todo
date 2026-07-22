@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Literal
 
+from pydantic_ai import RunContext
 from pydantic_ai.toolsets import FunctionToolset
 
 from pydantic_ai_todo.storage import (
@@ -262,6 +264,8 @@ def create_todo_toolset(
     storage: TodoStorageProtocol | None = None,
     *,
     async_storage: AsyncTodoStorageProtocol | None = None,
+    storage_resolver: Callable[[RunContext[Any]], TodoStorageProtocol] | None = None,
+    async_storage_resolver: Callable[[RunContext[Any]], AsyncTodoStorageProtocol] | None = None,
     id: str | None = None,
     enable_subtasks: bool = False,
     descriptions: dict[str, str] | None = None,
@@ -277,6 +281,15 @@ def create_todo_toolset(
             Ignored if async_storage is provided.
         async_storage: Optional async storage backend implementing AsyncTodoStorageProtocol.
             When provided, all operations use async methods for true persistence.
+        storage_resolver: Optional callable that resolves the sync storage per run from the
+            tool's `RunContext`. When provided, each tool call resolves its storage via
+            `storage_resolver(ctx)` instead of using the closure `storage`, letting a single
+            toolset serve per-run (e.g. deps-backed) storage. Ignored if async_storage is
+            provided. Example: `storage_resolver=lambda ctx: MyAdapter(ctx.deps)`.
+        async_storage_resolver: Optional callable that resolves the async storage per run from
+            the tool's `RunContext`. Used with async_storage; when provided, each tool call
+            resolves its storage via `async_storage_resolver(ctx)` instead of the closure
+            storage. Example: `async_storage_resolver=lambda ctx: MyAsyncAdapter(ctx.deps)`.
         id: Optional unique ID for the toolset.
         enable_subtasks: Enable subtask and dependency features. When True, adds:
             - add_subtask: Create subtasks linked to parent todos
@@ -324,6 +337,16 @@ def create_todo_toolset(
         todos = await storage.get_todos()
         ```
 
+    Example (with a per-run resolver):
+        ```python
+        from pydantic_ai_todo import create_todo_toolset
+
+        # Resolve storage from per-run deps instead of a shared closure.
+        toolset = create_todo_toolset(
+            storage_resolver=lambda ctx: ctx.deps.todo_storage,
+        )
+        ```
+
     Example (with custom descriptions):
         ```python
         from pydantic_ai_todo import create_todo_toolset
@@ -340,6 +363,7 @@ def create_todo_toolset(
     if async_storage is not None:
         return _create_async_toolset(
             async_storage,
+            async_storage_resolver=async_storage_resolver,
             id=id,
             enable_subtasks=enable_subtasks,
             descriptions=_descs,
@@ -347,6 +371,7 @@ def create_todo_toolset(
     else:
         return _create_sync_toolset(
             storage,
+            storage_resolver=storage_resolver,
             id=id,
             enable_subtasks=enable_subtasks,
             descriptions=_descs,
@@ -356,6 +381,7 @@ def create_todo_toolset(
 def _create_sync_toolset(
     storage: TodoStorageProtocol | None = None,
     *,
+    storage_resolver: Callable[[RunContext[Any]], TodoStorageProtocol] | None = None,
     id: str | None = None,
     enable_subtasks: bool = False,
     descriptions: dict[str, str] | None = None,
@@ -377,14 +403,14 @@ def _create_sync_toolset(
             icons["blocked"] = "[!]"
         return icons.get(status, "[ ]")
 
-    def _get_todo_by_id(todo_id: str) -> Todo | None:
+    def _get_todo_by_id(store: TodoStorageProtocol, todo_id: str) -> Todo | None:
         """Find a todo by its ID."""
-        for todo in _storage.todos:
+        for todo in store.todos:
             if todo.id == todo_id:
                 return todo
         return None
 
-    def _has_cycle(todo_id: str, depends_on_id: str) -> bool:
+    def _has_cycle(store: TodoStorageProtocol, todo_id: str, depends_on_id: str) -> bool:
         """Check if adding a dependency would create a cycle."""
         visited: set[str] = set()
 
@@ -394,7 +420,7 @@ def _create_sync_toolset(
             if current_id in visited:
                 return False
             visited.add(current_id)
-            todo = _get_todo_by_id(current_id)
+            todo = _get_todo_by_id(store, current_id)
             if todo:
                 for dep_id in todo.depends_on:
                     if visit(dep_id):
@@ -403,10 +429,10 @@ def _create_sync_toolset(
 
         return visit(depends_on_id)
 
-    def _is_blocked(todo: Todo) -> bool:
+    def _is_blocked(store: TodoStorageProtocol, todo: Todo) -> bool:
         """Check if a todo is blocked by incomplete dependencies."""
         for dep_id in todo.depends_on:
-            dep = _get_todo_by_id(dep_id)
+            dep = _get_todo_by_id(store, dep_id)
             if dep and dep.status != "completed":
                 return True
         return False
@@ -443,21 +469,22 @@ def _create_sync_toolset(
         _default_read = READ_TODO_DESCRIPTION + "\nSet hierarchical=True to view as tree."
         read_description = _descs.get("read_todos", _default_read)
 
-        @toolset.tool_plain(description=read_description)
-        async def read_todos(hierarchical: bool = False) -> str:  # pyright: ignore[reportRedeclaration]
+        @toolset.tool(description=read_description)
+        async def read_todos(ctx: RunContext[Any], hierarchical: bool = False) -> str:  # pyright: ignore[reportRedeclaration]
             """Read the current todo list.
 
             Args:
                 hierarchical: If True, display todos as a tree with subtasks indented.
             """
-            if not _storage.todos:
+            store = storage_resolver(ctx) if storage_resolver is not None else _storage
+            if not store.todos:
                 return "No todos in the list. Use write_todos to create tasks."
 
             if hierarchical:
-                result = _format_hierarchical(_storage.todos)
+                result = _format_hierarchical(store.todos)
             else:
                 lines = ["Current todos:"]
-                for i, todo in enumerate(_storage.todos, 1):
+                for i, todo in enumerate(store.todos, 1):
                     status_icon = _get_status_icon(todo.status, enable_subtasks=True)
                     lines.append(f"{i}. {status_icon} [{todo.id}] {todo.content}")
                     if todo.parent_id:
@@ -468,7 +495,7 @@ def _create_sync_toolset(
 
             # Add summary
             counts: dict[str, int] = {"pending": 0, "in_progress": 0, "completed": 0, "blocked": 0}
-            for todo in _storage.todos:
+            for todo in store.todos:
                 counts[todo.status] = counts.get(todo.status, 0) + 1
 
             summary_parts = [f"{counts['completed']} completed"]
@@ -488,20 +515,21 @@ def _create_sync_toolset(
             return result + summary
     else:
 
-        @toolset.tool_plain(description=_descs.get("read_todos", READ_TODO_DESCRIPTION))
-        async def read_todos() -> str:  # pyright: ignore[reportRedeclaration]
+        @toolset.tool(description=_descs.get("read_todos", READ_TODO_DESCRIPTION))
+        async def read_todos(ctx: RunContext[Any]) -> str:  # pyright: ignore[reportRedeclaration]
             """Read the current todo list."""
-            if not _storage.todos:
+            store = storage_resolver(ctx) if storage_resolver is not None else _storage
+            if not store.todos:
                 return "No todos in the list. Use write_todos to create tasks."
 
             lines = ["Current todos:"]
-            for i, todo in enumerate(_storage.todos, 1):
+            for i, todo in enumerate(store.todos, 1):
                 status_icon = _get_status_icon(todo.status)
                 lines.append(f"{i}. {status_icon} [{todo.id}] {todo.content}")
 
             # Add summary
             counts: dict[str, int] = {"pending": 0, "in_progress": 0, "completed": 0}
-            for todo in _storage.todos:
+            for todo in store.todos:
                 counts[todo.status] = counts.get(todo.status, 0) + 1
 
             lines.append("")
@@ -520,13 +548,14 @@ def _create_sync_toolset(
 
             return "\n".join(lines)
 
-    @toolset.tool_plain(description=_descs.get("write_todos", TODO_TOOL_DESCRIPTION))
-    async def write_todos(todos: list[TodoItem]) -> str:
+    @toolset.tool(description=_descs.get("write_todos", TODO_TOOL_DESCRIPTION))
+    async def write_todos(ctx: RunContext[Any], todos: list[TodoItem]) -> str:
         """Update the todo list with new items.
 
         Args:
             todos: List of todo items with content, status, and active_form.
         """
+        store = storage_resolver(ctx) if storage_resolver is not None else _storage
         new_todos: list[Todo] = []
         for t in todos:
             todo_kwargs: dict[str, Any] = {
@@ -540,13 +569,13 @@ def _create_sync_toolset(
                 todo_kwargs["parent_id"] = t.parent_id
                 todo_kwargs["depends_on"] = t.depends_on
             new_todos.append(Todo(**todo_kwargs))
-        _storage.todos = new_todos
+        store.todos = new_todos
 
         # Count by status
         counts: dict[str, int] = {"pending": 0, "in_progress": 0, "completed": 0}
         if enable_subtasks:
             counts["blocked"] = 0
-        for todo in _storage.todos:
+        for todo in store.todos:
             counts[todo.status] = counts.get(todo.status, 0) + 1
 
         summary_parts = [f"{counts['completed']} completed"]
@@ -557,8 +586,8 @@ def _create_sync_toolset(
 
         return f"Updated {len(todos)} todos: {', '.join(summary_parts)}"
 
-    @toolset.tool_plain(description=_descs.get("add_todo", ADD_TODO_DESCRIPTION))
-    async def add_todo(content: str, active_form: str) -> str:
+    @toolset.tool(description=_descs.get("add_todo", ADD_TODO_DESCRIPTION))
+    async def add_todo(ctx: RunContext[Any], content: str, active_form: str) -> str:
         """Add a new todo item to the list.
 
         Args:
@@ -568,14 +597,15 @@ def _create_sync_toolset(
         Returns:
             Confirmation message with the new todo's ID.
         """
+        store = storage_resolver(ctx) if storage_resolver is not None else _storage
         new_todo = Todo(content=content, status="pending", active_form=active_form)
-        _storage.todos = [*_storage.todos, new_todo]
+        store.todos = [*store.todos, new_todo]
         return f"Added todo '{content}' with ID: {new_todo.id}"
 
-    @toolset.tool_plain(
+    @toolset.tool(
         description=_descs.get("update_todo_status", UPDATE_TODO_STATUS_DESCRIPTION),
     )
-    async def update_todo_status(todo_id: str, status: str) -> str:
+    async def update_todo_status(ctx: RunContext[Any], todo_id: str, status: str) -> str:
         """Update the status of an existing todo.
 
         Args:
@@ -585,26 +615,27 @@ def _create_sync_toolset(
         Returns:
             Confirmation message or error if not found.
         """
+        store = storage_resolver(ctx) if storage_resolver is not None else _storage
         valid_statuses = {"pending", "in_progress", "completed"}
         if enable_subtasks:
             valid_statuses.add("blocked")
         if status not in valid_statuses:
             return f"Invalid status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
 
-        for todo in _storage.todos:
+        for todo in store.todos:
             if todo.id == todo_id:
                 # Check if trying to start a blocked task
-                if enable_subtasks and status == "in_progress" and _is_blocked(todo):
+                if enable_subtasks and status == "in_progress" and _is_blocked(store, todo):
                     return f"Cannot start '{todo.content}' - it has incomplete dependencies"
                 todo.status = status  # type: ignore[assignment]
                 return f"Updated todo '{todo.content}' status to '{status}'"
 
         return f"Todo with ID '{todo_id}' not found"
 
-    @toolset.tool_plain(
+    @toolset.tool(
         description=_descs.get("update_todo_statuses", UPDATE_TODO_STATUSES_DESCRIPTION),
     )
-    async def update_todo_statuses(updates: list[TodoStatusUpdate]) -> str:
+    async def update_todo_statuses(ctx: RunContext[Any], updates: list[TodoStatusUpdate]) -> str:
         """Update the status of several todos atomically.
 
         The whole batch is validated before any change is applied: if any entry
@@ -617,6 +648,7 @@ def _create_sync_toolset(
             A compact summary of the applied transitions, or the validation
             errors when nothing was applied.
         """
+        store = storage_resolver(ctx) if storage_resolver is not None else _storage
         if not updates:
             return "No updates provided."
 
@@ -634,11 +666,11 @@ def _create_sync_toolset(
                     f"Must be one of: {', '.join(sorted(valid_statuses))}"
                 )
                 continue
-            todo = _get_todo_by_id(update.todo_id)
+            todo = _get_todo_by_id(store, update.todo_id)
             if todo is None:
                 errors.append(f"Todo with ID '{update.todo_id}' not found")
                 continue
-            if enable_subtasks and update.status == "in_progress" and _is_blocked(todo):
+            if enable_subtasks and update.status == "in_progress" and _is_blocked(store, todo):
                 errors.append(f"Cannot start '{todo.content}' - it has incomplete dependencies")
                 continue
             resolved.append((todo, update.status))
@@ -653,8 +685,8 @@ def _create_sync_toolset(
 
         return f"Updated {len(resolved)} todos:\n" + "\n".join(lines)
 
-    @toolset.tool_plain(description=_descs.get("remove_todo", REMOVE_TODO_DESCRIPTION))
-    async def remove_todo(todo_id: str) -> str:
+    @toolset.tool(description=_descs.get("remove_todo", REMOVE_TODO_DESCRIPTION))
+    async def remove_todo(ctx: RunContext[Any], todo_id: str) -> str:
         """Remove a todo from the list.
 
         Args:
@@ -663,9 +695,10 @@ def _create_sync_toolset(
         Returns:
             Confirmation message or error if not found.
         """
-        for i, todo in enumerate(_storage.todos):
+        store = storage_resolver(ctx) if storage_resolver is not None else _storage
+        for i, todo in enumerate(store.todos):
             if todo.id == todo_id:
-                removed = _storage.todos.pop(i)
+                removed = store.todos.pop(i)
                 return f"Removed todo '{removed.content}' (ID: {todo_id})"
 
         return f"Todo with ID '{todo_id}' not found"
@@ -673,8 +706,10 @@ def _create_sync_toolset(
     # Add subtask-related tools only when enabled
     if enable_subtasks:
 
-        @toolset.tool_plain(description=_descs.get("add_subtask", ADD_SUBTASK_DESCRIPTION))
-        async def add_subtask(parent_id: str, content: str, active_form: str) -> str:
+        @toolset.tool(description=_descs.get("add_subtask", ADD_SUBTASK_DESCRIPTION))
+        async def add_subtask(
+            ctx: RunContext[Any], parent_id: str, content: str, active_form: str
+        ) -> str:
             """Add a subtask to an existing todo.
 
             Args:
@@ -686,7 +721,8 @@ def _create_sync_toolset(
             Returns:
                 Confirmation message with the new subtask's ID or error.
             """
-            parent = _get_todo_by_id(parent_id)
+            store = storage_resolver(ctx) if storage_resolver is not None else _storage
+            parent = _get_todo_by_id(store, parent_id)
             if not parent:
                 return f"Parent todo with ID '{parent_id}' not found"
 
@@ -696,11 +732,11 @@ def _create_sync_toolset(
                 active_form=active_form,
                 parent_id=parent_id,
             )
-            _storage.todos = [*_storage.todos, new_todo]
+            store.todos = [*store.todos, new_todo]
             return f"Added subtask '{content}' with ID: {new_todo.id} (parent: {parent_id})"
 
-        @toolset.tool_plain(description=_descs.get("set_dependency", SET_DEPENDENCY_DESCRIPTION))
-        async def set_dependency(todo_id: str, depends_on_id: str) -> str:
+        @toolset.tool(description=_descs.get("set_dependency", SET_DEPENDENCY_DESCRIPTION))
+        async def set_dependency(ctx: RunContext[Any], todo_id: str, depends_on_id: str) -> str:
             """Set a dependency between two todos.
 
             Args:
@@ -710,18 +746,19 @@ def _create_sync_toolset(
             Returns:
                 Confirmation message or error if validation fails.
             """
-            todo = _get_todo_by_id(todo_id)
+            store = storage_resolver(ctx) if storage_resolver is not None else _storage
+            todo = _get_todo_by_id(store, todo_id)
             if not todo:
                 return f"Todo with ID '{todo_id}' not found"
 
-            dependency = _get_todo_by_id(depends_on_id)
+            dependency = _get_todo_by_id(store, depends_on_id)
             if not dependency:
                 return f"Dependency todo with ID '{depends_on_id}' not found"
 
             if todo_id == depends_on_id:
                 return "A todo cannot depend on itself"
 
-            if _has_cycle(todo_id, depends_on_id):
+            if _has_cycle(store, todo_id, depends_on_id):
                 return "Cannot add dependency: would create a cycle"
 
             if depends_on_id in todo.depends_on:
@@ -739,22 +776,23 @@ def _create_sync_toolset(
 
             return f"Added dependency: '{todo.content}' now depends on '{dependency.content}'"
 
-        @toolset.tool_plain(
+        @toolset.tool(
             description=_descs.get("get_available_tasks", GET_AVAILABLE_TASKS_DESCRIPTION)
         )
-        async def get_available_tasks() -> str:
+        async def get_available_tasks(ctx: RunContext[Any]) -> str:
             """Get all tasks that can be worked on now.
 
             Returns:
                 List of tasks without incomplete dependencies.
             """
+            store = storage_resolver(ctx) if storage_resolver is not None else _storage
             available: list[Todo] = []
-            for todo in _storage.todos:
+            for todo in store.todos:
                 if todo.status == "completed":
                     continue
                 if todo.status == "blocked":
                     continue
-                if not _is_blocked(todo):
+                if not _is_blocked(store, todo):
                     available.append(todo)
 
             if not available:
@@ -773,6 +811,7 @@ def _create_sync_toolset(
 def _create_async_toolset(
     storage: AsyncTodoStorageProtocol,
     *,
+    async_storage_resolver: Callable[[RunContext[Any]], AsyncTodoStorageProtocol] | None = None,
     id: str | None = None,
     enable_subtasks: bool = False,
     descriptions: dict[str, str] | None = None,
@@ -780,6 +819,13 @@ def _create_async_toolset(
     """Create toolset with async storage for true persistence."""
     toolset: FunctionToolset[Any] = FunctionToolset(id=id)
     _descs = descriptions or {}
+    _async_storage = storage
+
+    def _resolve_store(ctx: RunContext[Any]) -> AsyncTodoStorageProtocol:
+        """Resolve the async storage for this run (per-run resolver or closure default)."""
+        if async_storage_resolver is not None:
+            return async_storage_resolver(ctx)
+        return _async_storage
 
     def _get_status_icon(status: str, enable_subtasks: bool = False) -> str:
         """Get the icon for a todo status."""
@@ -792,13 +838,13 @@ def _create_async_toolset(
             icons["blocked"] = "[!]"
         return icons.get(status, "[ ]")
 
-    async def _get_todo_by_id(todo_id: str) -> Todo | None:
+    async def _get_todo_by_id(store: AsyncTodoStorageProtocol, todo_id: str) -> Todo | None:
         """Find a todo by its ID."""
-        return await storage.get_todo(todo_id)
+        return await store.get_todo(todo_id)
 
-    async def _has_cycle(todo_id: str, depends_on_id: str) -> bool:
+    async def _has_cycle(store: AsyncTodoStorageProtocol, todo_id: str, depends_on_id: str) -> bool:
         """Check if adding a dependency would create a cycle."""
-        todos = await storage.get_todos()
+        todos = await store.get_todos()
         todos_map = {t.id: t for t in todos}
         visited: set[str] = set()
 
@@ -817,10 +863,10 @@ def _create_async_toolset(
 
         return visit(depends_on_id)
 
-    async def _is_blocked(todo: Todo) -> bool:
+    async def _is_blocked(store: AsyncTodoStorageProtocol, todo: Todo) -> bool:
         """Check if a todo is blocked by incomplete dependencies."""
         for dep_id in todo.depends_on:
-            dep = await _get_todo_by_id(dep_id)
+            dep = await _get_todo_by_id(store, dep_id)
             if dep and dep.status != "completed":
                 return True
         return False
@@ -856,14 +902,15 @@ def _create_async_toolset(
         _default_read = READ_TODO_DESCRIPTION + "\nSet hierarchical=True to view as tree."
         read_description = _descs.get("read_todos", _default_read)
 
-        @toolset.tool_plain(description=read_description)
-        async def read_todos(hierarchical: bool = False) -> str:  # pyright: ignore[reportRedeclaration]
+        @toolset.tool(description=read_description)
+        async def read_todos(ctx: RunContext[Any], hierarchical: bool = False) -> str:  # pyright: ignore[reportRedeclaration]
             """Read the current todo list.
 
             Args:
                 hierarchical: If True, display todos as a tree with subtasks indented.
             """
-            todos = await storage.get_todos()
+            store = _resolve_store(ctx)
+            todos = await store.get_todos()
             if not todos:
                 return "No todos in the list. Use write_todos to create tasks."
 
@@ -902,10 +949,11 @@ def _create_async_toolset(
             return result + summary
     else:
 
-        @toolset.tool_plain(description=_descs.get("read_todos", READ_TODO_DESCRIPTION))
-        async def read_todos() -> str:  # pyright: ignore[reportRedeclaration]
+        @toolset.tool(description=_descs.get("read_todos", READ_TODO_DESCRIPTION))
+        async def read_todos(ctx: RunContext[Any]) -> str:  # pyright: ignore[reportRedeclaration]
             """Read the current todo list."""
-            todos = await storage.get_todos()
+            store = _resolve_store(ctx)
+            todos = await store.get_todos()
             if not todos:
                 return "No todos in the list. Use write_todos to create tasks."
 
@@ -935,13 +983,14 @@ def _create_async_toolset(
 
             return "\n".join(lines)
 
-    @toolset.tool_plain(description=_descs.get("write_todos", TODO_TOOL_DESCRIPTION))
-    async def write_todos(todos: list[TodoItem]) -> str:
+    @toolset.tool(description=_descs.get("write_todos", TODO_TOOL_DESCRIPTION))
+    async def write_todos(ctx: RunContext[Any], todos: list[TodoItem]) -> str:
         """Update the todo list with new items.
 
         Args:
             todos: List of todo items with content, status, and active_form.
         """
+        store = _resolve_store(ctx)
         new_todos: list[Todo] = []
         for t in todos:
             todo_kwargs: dict[str, Any] = {
@@ -955,7 +1004,7 @@ def _create_async_toolset(
                 todo_kwargs["parent_id"] = t.parent_id
                 todo_kwargs["depends_on"] = t.depends_on
             new_todos.append(Todo(**todo_kwargs))
-        await storage.set_todos(new_todos)
+        await store.set_todos(new_todos)
 
         # Count by status
         counts: dict[str, int] = {"pending": 0, "in_progress": 0, "completed": 0}
@@ -972,8 +1021,8 @@ def _create_async_toolset(
 
         return f"Updated {len(todos)} todos: {', '.join(summary_parts)}"
 
-    @toolset.tool_plain(description=_descs.get("add_todo", ADD_TODO_DESCRIPTION))
-    async def add_todo(content: str, active_form: str) -> str:
+    @toolset.tool(description=_descs.get("add_todo", ADD_TODO_DESCRIPTION))
+    async def add_todo(ctx: RunContext[Any], content: str, active_form: str) -> str:
         """Add a new todo item to the list.
 
         Args:
@@ -983,15 +1032,18 @@ def _create_async_toolset(
         Returns:
             Confirmation message with the new todo's ID.
         """
+        store = _resolve_store(ctx)
         new_todo = Todo(content=content, status="pending", active_form=active_form)
-        await storage.add_todo(new_todo)
+        await store.add_todo(new_todo)
         return f"Added todo '{content}' with ID: {new_todo.id}"
 
-    @toolset.tool_plain(
+    @toolset.tool(
         description=_descs.get("update_todo_status", UPDATE_TODO_STATUS_DESCRIPTION),
     )
     async def update_todo_status(
-        todo_id: str, status: Literal["pending", "in_progress", "completed", "blocked"]
+        ctx: RunContext[Any],
+        todo_id: str,
+        status: Literal["pending", "in_progress", "completed", "blocked"],
     ) -> str:
         """Update the status of an existing todo.
 
@@ -1002,6 +1054,7 @@ def _create_async_toolset(
         Returns:
             Confirmation message or error if not found.
         """
+        store = _resolve_store(ctx)
         valid_statuses: set[str] = {"pending", "in_progress", "completed"}
         if enable_subtasks:
             valid_statuses.add("blocked")
@@ -1010,19 +1063,19 @@ def _create_async_toolset(
 
         # Check if trying to start a blocked task
         if enable_subtasks and status == "in_progress":
-            todo = await _get_todo_by_id(todo_id)
-            if todo and await _is_blocked(todo):
+            todo = await _get_todo_by_id(store, todo_id)
+            if todo and await _is_blocked(store, todo):
                 return f"Cannot start '{todo.content}' - it has incomplete dependencies"
 
-        updated = await storage.update_todo(todo_id, status=status)
+        updated = await store.update_todo(todo_id, status=status)
         if updated:
             return f"Updated todo '{updated.content}' status to '{status}'"
         return f"Todo with ID '{todo_id}' not found"
 
-    @toolset.tool_plain(
+    @toolset.tool(
         description=_descs.get("update_todo_statuses", UPDATE_TODO_STATUSES_DESCRIPTION),
     )
-    async def update_todo_statuses(updates: list[TodoStatusUpdate]) -> str:
+    async def update_todo_statuses(ctx: RunContext[Any], updates: list[TodoStatusUpdate]) -> str:
         """Update the status of several todos atomically.
 
         The whole batch is validated before any change is applied: if any entry
@@ -1035,6 +1088,7 @@ def _create_async_toolset(
             A compact summary of the applied transitions, or the validation
             errors when nothing was applied.
         """
+        store = _resolve_store(ctx)
         if not updates:
             return "No updates provided."
 
@@ -1052,11 +1106,15 @@ def _create_async_toolset(
                     f"Must be one of: {', '.join(sorted(valid_statuses))}"
                 )
                 continue
-            todo = await _get_todo_by_id(update.todo_id)
+            todo = await _get_todo_by_id(store, update.todo_id)
             if todo is None:
                 errors.append(f"Todo with ID '{update.todo_id}' not found")
                 continue
-            if enable_subtasks and update.status == "in_progress" and await _is_blocked(todo):
+            if (
+                enable_subtasks
+                and update.status == "in_progress"
+                and await _is_blocked(store, todo)
+            ):
                 errors.append(f"Cannot start '{todo.content}' - it has incomplete dependencies")
                 continue
             resolved.append((todo, update.status))
@@ -1066,13 +1124,13 @@ def _create_async_toolset(
 
         lines: list[str] = []
         for todo, status in resolved:
-            await storage.update_todo(todo.id, status=status)  # type: ignore[arg-type]
+            await store.update_todo(todo.id, status=status)  # type: ignore[arg-type]
             lines.append(f"- [{todo.id}] {todo.content} → {status}")
 
         return f"Updated {len(resolved)} todos:\n" + "\n".join(lines)
 
-    @toolset.tool_plain(description=_descs.get("remove_todo", REMOVE_TODO_DESCRIPTION))
-    async def remove_todo(todo_id: str) -> str:
+    @toolset.tool(description=_descs.get("remove_todo", REMOVE_TODO_DESCRIPTION))
+    async def remove_todo(ctx: RunContext[Any], todo_id: str) -> str:
         """Remove a todo from the list.
 
         Args:
@@ -1081,18 +1139,21 @@ def _create_async_toolset(
         Returns:
             Confirmation message or error if not found.
         """
+        store = _resolve_store(ctx)
         # Get todo content before removing for the message
-        todo = await storage.get_todo(todo_id)
+        todo = await store.get_todo(todo_id)
         if todo:
-            await storage.remove_todo(todo_id)
+            await store.remove_todo(todo_id)
             return f"Removed todo '{todo.content}' (ID: {todo_id})"
         return f"Todo with ID '{todo_id}' not found"
 
     # Add subtask-related tools only when enabled
     if enable_subtasks:
 
-        @toolset.tool_plain(description=_descs.get("add_subtask", ADD_SUBTASK_DESCRIPTION))
-        async def add_subtask(parent_id: str, content: str, active_form: str) -> str:
+        @toolset.tool(description=_descs.get("add_subtask", ADD_SUBTASK_DESCRIPTION))
+        async def add_subtask(
+            ctx: RunContext[Any], parent_id: str, content: str, active_form: str
+        ) -> str:
             """Add a subtask to an existing todo.
 
             Args:
@@ -1104,7 +1165,8 @@ def _create_async_toolset(
             Returns:
                 Confirmation message with the new subtask's ID or error.
             """
-            parent = await _get_todo_by_id(parent_id)
+            store = _resolve_store(ctx)
+            parent = await _get_todo_by_id(store, parent_id)
             if not parent:
                 return f"Parent todo with ID '{parent_id}' not found"
 
@@ -1114,11 +1176,11 @@ def _create_async_toolset(
                 active_form=active_form,
                 parent_id=parent_id,
             )
-            await storage.add_todo(new_todo)
+            await store.add_todo(new_todo)
             return f"Added subtask '{content}' with ID: {new_todo.id} (parent: {parent_id})"
 
-        @toolset.tool_plain(description=_descs.get("set_dependency", SET_DEPENDENCY_DESCRIPTION))
-        async def set_dependency(todo_id: str, depends_on_id: str) -> str:
+        @toolset.tool(description=_descs.get("set_dependency", SET_DEPENDENCY_DESCRIPTION))
+        async def set_dependency(ctx: RunContext[Any], todo_id: str, depends_on_id: str) -> str:
             """Set a dependency between two todos.
 
             Args:
@@ -1128,18 +1190,19 @@ def _create_async_toolset(
             Returns:
                 Confirmation message or error if validation fails.
             """
-            todo = await _get_todo_by_id(todo_id)
+            store = _resolve_store(ctx)
+            todo = await _get_todo_by_id(store, todo_id)
             if not todo:
                 return f"Todo with ID '{todo_id}' not found"
 
-            dependency = await _get_todo_by_id(depends_on_id)
+            dependency = await _get_todo_by_id(store, depends_on_id)
             if not dependency:
                 return f"Dependency todo with ID '{depends_on_id}' not found"
 
             if todo_id == depends_on_id:
                 return "A todo cannot depend on itself"
 
-            if await _has_cycle(todo_id, depends_on_id):
+            if await _has_cycle(store, todo_id, depends_on_id):
                 return "Cannot add dependency: would create a cycle"
 
             if depends_on_id in todo.depends_on:
@@ -1153,7 +1216,7 @@ def _create_async_toolset(
             if dependency.status != "completed" and todo.status not in ("completed", "blocked"):
                 new_status = "blocked"  # type: ignore[assignment]
 
-            await storage.update_todo(todo_id, depends_on=new_depends_on, status=new_status)
+            await store.update_todo(todo_id, depends_on=new_depends_on, status=new_status)
 
             if new_status == "blocked" and original_status != "blocked":
                 return (
@@ -1163,23 +1226,24 @@ def _create_async_toolset(
 
             return f"Added dependency: '{todo.content}' now depends on '{dependency.content}'"
 
-        @toolset.tool_plain(
+        @toolset.tool(
             description=_descs.get("get_available_tasks", GET_AVAILABLE_TASKS_DESCRIPTION)
         )
-        async def get_available_tasks() -> str:
+        async def get_available_tasks(ctx: RunContext[Any]) -> str:
             """Get all tasks that can be worked on now.
 
             Returns:
                 List of tasks without incomplete dependencies.
             """
-            todos = await storage.get_todos()
+            store = _resolve_store(ctx)
+            todos = await store.get_todos()
             available: list[Todo] = []
             for todo in todos:
                 if todo.status == "completed":
                     continue
                 if todo.status == "blocked":
                     continue
-                if not await _is_blocked(todo):
+                if not await _is_blocked(store, todo):
                     available.append(todo)
 
             if not available:

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-07-22
+
+### Changed
+
+- **`TodoCapability` no longer injects the live todo list into the system prompt by default.** The system prompt is the start of the provider's prompt-cache prefix, so rewriting it on every status change invalidated the whole cached prefix — including mid-run, after every mutating tool call — raising cached-workload input cost several-fold (a real trace showed 9.6k cache-read tokens instead of ~90k, ~8.5× the request cost). The prompt is now the static `TODO_SYSTEM_PROMPT`; the model still sees current state through the mutating tools' return values (append-only, cache-friendly history) and `read_todos`. Opt back into the old behavior with `TodoCapability(include_current_todos=True)` (requires sync `storage`). The `get_todo_system_prompt()` / `get_todo_system_prompt_async()` helpers are unchanged. Resolves [#41](https://github.com/vstorm-co/pydantic-ai-todo/issues/41).
+
 ## [0.2.6] - 2026-06-17
 
 ### Changed
