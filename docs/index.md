@@ -12,6 +12,24 @@
 
 ---
 
+!!! info "Upstreamed to `pydantic-ai-harness`"
+    Working together with the Pydantic team, we folded this library into the official
+    [pydantic-ai-harness](https://github.com/pydantic/pydantic-ai-harness) — it now lives in
+    [`pydantic_ai_harness/planning`](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/planning)
+    ([PR #404](https://github.com/pydantic/pydantic-ai-harness/pull/404), merged), which supersedes this
+    package.
+
+    **For new projects, use the harness.** This library stays on PyPI and keeps working for everyone
+    already depending on it. The [README](https://github.com/vstorm-co/pydantic-ai-todo#readme) has the
+    full mapping — note the tools were renamed (`write_todos` → `write_plan`, `add_todo` → `add_task`, …).
+
+    ```python
+    from pydantic_ai import Agent
+    from pydantic_ai_harness.planning import Planning
+
+    agent = Agent("openai:gpt-5.4", capabilities=[Planning(enable_subtasks=True)])
+    ```
+
 **Todo Toolset for Pydantic AI** adds task planning capabilities to any [Pydantic AI](https://ai.pydantic.dev/) agent. Your agent can create, track, and complete tasks with full support for subtasks, dependencies, and persistent storage.
 
 Think of it as giving your AI agent a todo list — so it can break down complex work, track progress, and remember what needs to be done.
