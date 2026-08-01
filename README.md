@@ -24,6 +24,49 @@
 
 ---
 
+> ### ⬆️ Upstreamed to `pydantic-ai-harness`
+>
+> Working together with the Pydantic team, we folded this library into the official
+> **[pydantic-ai-harness](https://github.com/pydantic/pydantic-ai-harness)** — it now lives in
+> [`pydantic_ai_harness/planning`](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/planning)
+> ([PR #404](https://github.com/pydantic/pydantic-ai-harness/pull/404), merged), which supersedes this package.
+>
+> **For new projects, use the harness** — it is maintained by Pydantic alongside Pydantic AI itself. This
+> repository stays on PyPI and keeps working for everyone already depending on it.
+>
+> ```python
+> from pydantic_ai import Agent
+> from pydantic_ai_harness.planning import Planning
+>
+> agent = Agent("openai:gpt-5.4", capabilities=[Planning(enable_subtasks=True)])
+> ```
+>
+> **Tools were renamed**
+>
+> | Here | In the harness |
+> |---|---|
+> | `write_todos` | `write_plan` |
+> | `read_todos` | `read_plan` |
+> | `add_todo` | `add_task` |
+> | `update_todo_status` / `update_todo_statuses` | `update_task_status` / `update_task_statuses` |
+> | `remove_todo` | `remove_task` |
+> | `add_subtask`, `set_dependency`, `get_available_tasks` | unchanged |
+>
+> **API mapping**
+>
+> | Here | In `pydantic_ai_harness.planning` |
+> |---|---|
+> | `TodoCapability` | `Planning` |
+> | `TodoStorage`, `AsyncMemoryStorage` | `InMemoryPlanStore` |
+> | `AsyncPostgresStorage` / `create_storage("postgres", connection_string=…)` | `PostgresPlanStore` — takes a **caller-owned** asyncpg-compatible pool, so the harness pulls in no database driver |
+> | `create_todo_toolset()` | `PlanningToolset` |
+> | `get_todo_system_prompt()` | not needed — `Planning` surfaces the plan as an ephemeral tail reminder behind a `CachePoint`, so the cached prefix stays byte-identical across turns |
+> | `Todo`, `TodoItem` | `PlanItem` |
+> | `TodoEvent`, `TodoEventType`, `TodoEventEmitter` | `PlanEvent`, `PlanEventType`, `PlanEventEmitter` |
+>
+> The harness also adds `SqlitePlanStore` and `RedisPlanStore`, and a `blocked` task status, none of which
+> exist here.
+
 **Todo Toolset for Pydantic AI** adds task planning capabilities to any [Pydantic AI](https://ai.pydantic.dev/) agent. Your agent can create, track, and complete tasks with full support for subtasks, dependencies, and persistent storage.
 
 > **Full framework?** Check out [Pydantic Deep Agents](https://github.com/vstorm-co/pydantic-deepagents) — complete agent framework with planning, filesystem, subagents, and skills.
